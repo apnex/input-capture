@@ -102,6 +102,12 @@ test("I12: the runtime check passes over dist, and fails on a bare or node: impo
 		"if (Math.PI) /'/.test(''); globalThis.x = 1; //'\n",
 		"{} /'/.test(''); process.exit(); //'\n",
 		"export const o = { self: 1 };\n",
+		'export const e = eval("this");\n',
+		"const F = Function; export const g = F(\"return this\")();\n",
+		'export const n = new Function("return this")();\n',
+		'export const c = (() => 0).constructor("return this")();\n',
+		'export const b = (() => 0)["constructor"]("return this")();\n',
+		'export const k = new (function () {}).constructor("return this")();\n',
 	];
 	// every plant a file of its own in one copy, run through the tool once: each must be reported
 	const dir = scratch(Object.fromEntries(bad.map((text, i) => [`plant-${String(i).padStart(2, "0")}.js`, text])));
@@ -125,6 +131,10 @@ test("I12: the runtime check reads names in code only, never in comments or stri
 	assert.deepEqual(findRuntimeUses("{} /'/.test(''); process.exit(); //'\n").map((f) => f.finding), ["names process"], "a regular expression after a block's } is no division");
 	assert.deepEqual(findRuntimeUses("const o = { self: 1 };\n").map((f) => f.finding), ["names self"], "an object-literal key is counted");
 	assert.deepEqual(findRuntimeUses("const m = import.meta.url; const n = a?.process;\n"), [], "import.meta is no dynamic import, and an optional member is a member");
+	assert.deepEqual(findRuntimeUses('const a = x.eval; const b = y.Function; const s = "eval(Function)"; const c = o.constructor; const d = o.constructor === Object; // eval\n'), [], "eval and Function as members, in strings and comments, and a constructor read but not called, pass");
+	assert.deepEqual(findRuntimeUses('const g = eval("this");\n').map((f) => f.finding), ["names eval"]);
+	assert.deepEqual(findRuntimeUses('const g = new Function("return this")();\n').map((f) => f.finding), ["names Function"]);
+	assert.deepEqual(findRuntimeUses('const g = f.constructor("return this")();\n').map((f) => f.finding), ["calls through a property named constructor, which reaches Function"]);
 	assert.throws(() => findRuntimeUses('const s = "open;\n'), /could not parse/);
 });
 
@@ -149,6 +159,11 @@ test("I12: the clock and chance check passes over dist, and fails on a clock, a 
 		"export const o = new Date();\n",
 		"export const p = `${Math[`random`]()}`;\n",
 		"function q({ random } = Math) { return random(); }\nexport { q };\n",
+		"export const r = new Intl.DateTimeFormat().format();\n",
+		"const { DateTimeFormat } = Intl; export const s = DateTimeFormat;\n",
+		"export const u = Temporal.Now.instant();\n",
+		"export const v = new WeakRef({});\n",
+		"export const w = new FinalizationRegistry(() => 0);\n",
 	];
 	for (const text of bad) assert.ok(findClockAndChance(text).length > 0, text);
 	// every plant a file of its own in one copy, run through the tool once: each must be reported
@@ -170,6 +185,8 @@ test("I12: the clock and chance check reads code only, and passes a direct membe
 		"// Date.now(), Math.random() and setTimeout in a comment\nexport const c = 'Math.random() and Date.now()';\n",
 		"export const d = options.Date + record.performance + x.random;\n",
 		"const { random } = other; export const e = random;\n",
+		"export const f = options.Intl + record.Temporal + held.WeakRef + held.FinalizationRegistry;\n",
+		"// Intl.DateTimeFormat, Temporal.Now, new WeakRef and FinalizationRegistry in a comment\nexport const g = 'Intl Temporal WeakRef';\n",
 	];
 	for (const text of clean) assert.deepEqual(findClockAndChance(text), [], text);
 	assert.deepEqual(findClockAndChance('export const c = Math["random"]();\n').map((f) => f.finding), ["reads Math.random by brackets", "uses Math as a value, not as a direct member access by identifier"]);

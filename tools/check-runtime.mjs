@@ -3,7 +3,9 @@
 // built file of a component meant for every runtime imports a bare specifier or a `node:` module, holds
 // a dynamic `import(`, or names `process`, `require`, `Buffer`, `window`, `document`, `self`, `global`
 // or `globalThis` -- so the whole of the module graph loads with its first import, in Node and in a
-// browser alike.
+// browser alike -- or names `eval` or `Function`, or calls or constructs through a property named
+// `constructor` (`f.constructor("return this")`), each of which reaches the global object from a string
+// of code.
 //
 // Each file is parsed by TypeScript into a syntax tree (ts.createSourceFile, ScriptKind.JS, as a
 // module), so comments, strings, template literals and regular-expression literals are what the
@@ -11,7 +13,9 @@
 // - every import and export declaration, whose module specifier must be a relative file;
 // - every call whose callee is the `import` keyword -- a dynamic import;
 // - every identifier, except the name of a property access (`a.self`, `a?.self`), which is a member and
-//   not the global; an object-literal key (`{ self: 1 }`) is an identifier and is counted.
+//   not the global; an object-literal key (`{ self: 1 }`) is an identifier and is counted;
+// - every call or `new` whose callee is a property named `constructor`, by dot or by brackets with a
+//   string literal -- any function's constructor being `Function`.
 // A file TypeScript cannot parse without a diagnostic fails the check rather than being guessed at.
 //
 // Usage:  node tools/check-runtime.mjs [DIR_OR_FILE ...]    (default: dist, its .js files)
@@ -21,7 +25,12 @@ import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-export const RUNTIME_NAMES = ["process", "require", "Buffer", "window", "document", "self", "global", "globalThis"];
+export const RUNTIME_NAMES = ["process", "require", "Buffer", "window", "document", "self", "global", "globalThis", "eval", "Function"];
+
+/** True when a callee is a property named `constructor`, reached by dot or by brackets with a string literal. */
+const isConstructorProperty = (callee) =>
+	(ts.isPropertyAccessExpression(callee) && callee.name.text === "constructor") ||
+	(ts.isElementAccessExpression(callee) && (ts.isStringLiteral(callee.argumentExpression) || ts.isNoSubstitutionTemplateLiteral(callee.argumentExpression)) && callee.argumentExpression.text === "constructor");
 
 /** A built file's syntax tree, parsed as an ES module; throws when TypeScript reports a parse diagnostic. */
 export function parseModule(source, fileName = "built.js") {
@@ -47,6 +56,7 @@ export function findRuntimeUses(source, fileName) {
 			if (!specifier.startsWith("./") && !specifier.startsWith("../")) found.push({ line: lineOf(node), finding: `imports "${specifier}", which is not a relative file` });
 		}
 		if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) found.push({ line: lineOf(node), finding: "holds a dynamic import(" });
+		if ((ts.isCallExpression(node) || ts.isNewExpression(node)) && isConstructorProperty(node.expression)) found.push({ line: lineOf(node), finding: "calls through a property named constructor, which reaches Function" });
 		if (ts.isIdentifier(node) && RUNTIME_NAMES.includes(node.text)) {
 			const member = ts.isPropertyAccessExpression(node.parent) && node.parent.name === node;
 			if (!member) found.push({ line: lineOf(node), finding: `names ${node.text}` });

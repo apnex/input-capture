@@ -7,8 +7,10 @@
 // Each file is parsed by TypeScript into a syntax tree (check-runtime.mjs's parseModule), and the walk
 // finds, in source order:
 // - every identifier naming a clock, a timer, a source of chance or a network global -- Date,
-//   performance, setTimeout, crypto, fetch and the rest below -- except the name of a property access
-//   (`a.Date`), which is a member and not the global;
+//   performance, setTimeout, crypto, fetch and the rest below, Intl (whose DateTimeFormat reads the
+//   clock) and Temporal among them, and WeakRef and FinalizationRegistry, whose answers follow the
+//   collector's timing -- except the name of a property access (`a.Date`), which is a member and not the
+//   global;
 // - `Math.random`, and a member named `random` or `now` reached by brackets with a string literal on
 //   Math, Date or performance (`Math["random"]`);
 // - every use of `Math` as a value other than a direct member access by identifier, so `Math.max(1, 2)`
@@ -25,7 +27,7 @@ import ts from "typescript";
 import { parseModule } from "./check-runtime.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-export const CLOCK_AND_CHANCE_NAMES = ["Date", "performance", "setTimeout", "setInterval", "setImmediate", "clearTimeout", "clearInterval", "clearImmediate", "queueMicrotask", "requestAnimationFrame", "requestIdleCallback", "crypto", "fetch", "XMLHttpRequest", "WebSocket", "navigator", "location"];
+export const CLOCK_AND_CHANCE_NAMES = ["Date", "performance", "setTimeout", "setInterval", "setImmediate", "clearTimeout", "clearInterval", "clearImmediate", "queueMicrotask", "requestAnimationFrame", "requestIdleCallback", "crypto", "fetch", "XMLHttpRequest", "WebSocket", "navigator", "location", "Intl", "Temporal", "WeakRef", "FinalizationRegistry"];
 const HOLDERS = ["Math", "Date", "performance"];
 const BANNED_MEMBERS = ["random", "now"];
 
