@@ -8,8 +8,10 @@
  * y are read, both before either is judged, so a point with getters answers.
  *
  * A refusal is a TypeError whose message begins with the platform event's name and a colon, or with
- * "toDrawing: " for the conversion's answer; an error a getter or a trap threw is named after
- * "could not be read:".
+ * "toDrawing: " for the conversion's answer; a value a getter or a trap threw is named after
+ * "could not be read:" without running any of its code: a primitive as String writes it, an object as
+ * "an object" and a function as "a function", nothing of either read beyond its typeof -- so no getter
+ * and no trap of the thrown value runs after the point of refusal.
  */
 import type { PlatformMethod } from "./declaration-reading.js";
 
@@ -42,13 +44,15 @@ export interface KeyFields {
 	readonly preventDefault: PlatformMethod;
 }
 
-/** The message of an error a getter or a trap threw, or a stand-in when even that cannot be read. */
-export function messageOf(error: unknown): string {
-	try {
-		return error instanceof Error ? error.message : String(error);
-	} catch {
-		return "an unreadable error";
-	}
+/**
+ * The name of a value a getter or a trap threw, made from its typeof alone for an object or a function:
+ * reading its message, its prototype or its string form could run its getters, its traps or its
+ * toString, the application's code, after the event was refused.
+ */
+export function nameOfThrown(thrown: unknown): string {
+	if (typeof thrown === "object" && thrown !== null) return "an object";
+	if (typeof thrown === "function") return "a function";
+	return String(thrown);
 }
 
 /** IC2 rule 5: an object is a non-null value whose typeof is 'object', so a function never is one. */
@@ -66,7 +70,7 @@ function readField(name: string, event: object, field: string): unknown {
 	try {
 		return (event as Record<string, unknown>)[field];
 	} catch (error) {
-		throw new TypeError(`${name}: the event's ${field} could not be read: ${messageOf(error)}`);
+		throw new TypeError(`${name}: the event's ${field} could not be read: ${nameOfThrown(error)}`);
 	}
 }
 
@@ -124,7 +128,7 @@ export function readConvertedPoint(answer: unknown): { readonly x: number; reado
 		x = (answer as Record<string, unknown>)["x"];
 		y = (answer as Record<string, unknown>)["y"];
 	} catch (error) {
-		throw new TypeError(`toDrawing: the answer could not be read: ${messageOf(error)}`);
+		throw new TypeError(`toDrawing: the answer could not be read: ${nameOfThrown(error)}`);
 	}
 	if (!isFiniteNumber(x) || !isFiniteNumber(y)) throw new TypeError("toDrawing: the answer must hold finite numbers x and y");
 	return { x, y };

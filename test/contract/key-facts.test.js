@@ -92,7 +92,7 @@ test("I5: a key event refused at each place stops the reading there, no later fi
 	for (const field of FIELDS) {
 		const log = [];
 		const { platform } = opened({ focus: () => log.push("focus"), deliver: () => log.push("deliver") });
-		const hooks = { get: (t, k) => (k === field ? (() => { throw new Error(`no ${field}`); })() : t[k]) };
+		const hooks = { get: (t, k) => (k === field ? (() => { throw `no ${field}`; })() : t[k]) };
 		refused("keyup", () => platform.keys.fire("keyup", recorded(keyEvent(), "event", log, hooks)), (e) => e.message.includes(`could not be read: no ${field}`));
 		assert.deepEqual(log, FIELDS.slice(0, FIELDS.indexOf(field) + 1).map((f) => `event get ${f}`), `a getter throwing at ${field}`);
 	}

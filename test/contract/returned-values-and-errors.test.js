@@ -9,7 +9,7 @@ import { test } from "node:test";
 import { openCapture } from "@apnex/input-capture";
 import { declarationOver, fakePlatform, keyEvent, pointerEvent } from "../support/fakes.js";
 import { describe, isFrozenToDepth } from "../support/frozen.js";
-import { revoked, trapping } from "../support/recording-proxy.js";
+import { recorded, revoked, trapping } from "../support/recording-proxy.js";
 
 const POINTER_NAMES = ["pointerleave", "pointerdown", "pointermove", "pointerup", "pointercancel", "pointerover", "pointerout", "dblclick"];
 const throwingGetter = (name) => Object.defineProperty({}, name, { get() {
@@ -55,12 +55,49 @@ test("Errors: a refused conversion answer, or one whose reading throws, is a Typ
 	const { platform, delivered } = opened({ toDrawing: () => answer });
 	assert.throws(() => platform.surface.fire("pointerdown", pointerEvent()), (e) => e.constructor === TypeError && e.message.startsWith("toDrawing: "));
 	answer = throwingGetter("x");
-	assert.throws(() => platform.surface.fire("pointerdown", pointerEvent()), (e) => e.constructor === TypeError && /^toDrawing: .*could not be read: the getter's own$/.test(e.message));
+	assert.throws(() => platform.surface.fire("pointerdown", pointerEvent()), (e) => e.constructor === TypeError && /^toDrawing: .*could not be read: an object$/.test(e.message));
 	const event = pointerEvent();
 	Object.defineProperty(event, "buttons", { get() {
 		throw new RangeError("the getter's own");
 	} });
-	assert.throws(() => platform.surface.fire("pointerdown", event), (e) => e.constructor === TypeError && /^pointerdown: .*could not be read: the getter's own$/.test(e.message));
+	assert.throws(() => platform.surface.fire("pointerdown", event), (e) => e.constructor === TypeError && /^pointerdown: .*could not be read: an object$/.test(e.message));
+	assert.equal(delivered.length, 0);
+});
+
+test("Errors: a thrown value is named without running its code -- a thrown Proxy's traps never run, a thrown object's message getter never runs, a primitive written as String writes it", () => {
+	const trapLog = [];
+	const thrownProxy = recorded(new Error("hidden"), "thrown", trapLog);
+	const field = (thrown) => {
+		const event = pointerEvent();
+		Object.defineProperty(event, "pointerType", { get() {
+			throw thrown;
+		} });
+		return event;
+	};
+	const { platform, delivered } = opened();
+	assert.throws(() => platform.surface.fire("pointerdown", field(thrownProxy)), (e) => e.constructor === TypeError && e.message.startsWith("pointerdown: ") && e.message.endsWith("could not be read: an object"));
+	assert.deepEqual(trapLog, [], "no trap of the thrown Proxy ran");
+	// a thrown object whose message getter would close the capture: never read, so the capture stays open
+	let capture;
+	let read = false;
+	const fakes = fakePlatform();
+	({ capture } = openCapture({ ...declarationOver(fakes).declaration, toDrawing: () => ({ get x() {
+		throw { get message() {
+			read = true;
+			capture.close();
+			return "closed";
+		}, toString() {
+			read = true;
+			return "string form";
+		} };
+	} }) }));
+	assert.throws(() => fakes.surface.fire("pointermove", pointerEvent()), (e) => e.constructor === TypeError && e.message === "toDrawing: the answer could not be read: an object");
+	assert.equal(read, false, "neither its message nor its string form was read");
+	assert.equal(fakes.surface.live.size + fakes.keys.live.size, 10, "the capture is still open");
+	assert.throws(() => platform.surface.fire("pointerup", field(Object.assign(() => 0, { message: "m" }))), (e) => e.message.endsWith("could not be read: a function"));
+	for (const [thrown, name] of [["boom", "boom"], [404, "404"], [null, "null"], [undefined, "undefined"], [Symbol("s"), "Symbol(s)"], [7n, "7"], [false, "false"]]) {
+		assert.throws(() => platform.surface.fire("pointermove", field(thrown)), (e) => e.message.endsWith(`could not be read: ${name}`), name);
+	}
 	assert.equal(delivered.length, 0);
 });
 

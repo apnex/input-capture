@@ -74,6 +74,7 @@ A listener throws a `TypeError` before `deliver` is called, so nothing is delive
 A reply's method called once its delivery has ended, or `takePointer` called again before its first call returns, throws an `Error`, the base constructor, beginning `claim: ` or `takePointer: `.\
 Any other exception -- from an application function, or from a platform method capture calls -- propagates unchanged: beyond the readings above, capture catches only what `setPointerCapture` throws (IC8), and what a removal throws, which it holds until the other removals are attempted (IC3).\
 A message's beginning is the contract and the rest is prose, as `input-binding` settled.\
+A value a getter or a trap threw is named without running any of its code: a primitive as `String` writes it, an object as "an object" and a function as "a function", nothing of either read beyond its `typeof`, so no getter, trap or `toString` of the thrown value runs after the point of refusal (`docs/DECISIONS.md`, `D2`).\
 Tested by: `test/contract/returned-values-and-errors.test.js`, and each capability's own file.
 
 **What is returned.**\

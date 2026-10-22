@@ -137,7 +137,7 @@ test("I6, IC2 rule 4: the conversion is handed a fresh frozen screen point; its 
 			throw new RangeError("no x");
 		},
 	};
-	refused("toDrawing", () => platform.surface.fire("pointermove", pointerEvent()), (e) => e.message.includes("could not be read: no x"));
+	refused("toDrawing", () => platform.surface.fire("pointermove", pointerEvent()), (e) => e.message.endsWith("could not be read: an object"));
 	assert.equal(delivered.length, 2, "nothing delivered for a refused answer");
 });
 
@@ -154,7 +154,7 @@ test("I5: spies log each event's reads and calls in IC6's order -- the fields, t
 });
 
 test("I5: an event refused at each place stops the reading there, no later field read and no application function called", () => {
-	const throwing = (field) => ({ get: (t, k) => (k === field ? (() => { throw new Error(`no ${field}`); })() : t[k]) });
+	const throwing = (field) => ({ get: (t, k) => (k === field ? (() => { throw `no ${field}`; })() : t[k]) });
 	const cases = [
 		["clientX", { clientX: NaN }],
 		["clientX", { clientX: "1" }],
@@ -352,7 +352,7 @@ test("I9: an exception from each application function propagates out of the list
 test("I9: a getter or trap throwing while an event is read is rethrown as the listener's TypeError, beginning with the event's name", () => {
 	const { platform } = opened();
 	const event = new Proxy(pointerEvent(), { get() { throw new Error("trap"); } });
-	refused("pointerout", () => platform.surface.fire("pointerout", event), (e) => e.message.includes("could not be read: trap"));
+	refused("pointerout", () => platform.surface.fire("pointerout", event), (e) => e.message.endsWith("could not be read: an object"));
 	const { proxy, revoke } = Proxy.revocable(pointerEvent(), {});
 	revoke();
 	refused("dblclick", () => platform.surface.fire("dblclick", proxy), (e) => e.message.includes("could not be read:"));
