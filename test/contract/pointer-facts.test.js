@@ -127,7 +127,8 @@ test("I6, IC2 rule 4: the conversion is handed a fresh frozen screen point; its 
 	};
 	refused("toDrawing", () => platform.surface.fire("pointermove", pointerEvent()));
 	assert.deepEqual(reads, ["x", "y"], "y read though x is refused, as a point is read");
-	for (const bad of [() => ({ x: 1, y: 1 }), null, undefined, 5, "p", { x: 1 }, { x: NaN, y: 0 }, { x: 0, y: Infinity }, { x: "1", y: 1 }, { x: 1n, y: 1 }]) {
+	// a function is no object, even one holding finite x and y (IC2 rule 5)
+	for (const bad of [Object.assign(() => 0, { x: 1, y: 1 }), () => ({ x: 1, y: 1 }), null, undefined, 5, "p", { x: 1 }, { x: NaN, y: 0 }, { x: 0, y: Infinity }, { x: "1", y: 1 }, { x: 1n, y: 1 }]) {
 		answer = bad;
 		refused("toDrawing", () => platform.surface.fire("pointermove", pointerEvent()));
 	}

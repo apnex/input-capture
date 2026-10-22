@@ -257,10 +257,14 @@ test("I2, IC3 rule 5: close attempts every removal when one throws, and then thr
 test("I2, IC3 rule 5: a close made from inside a removal returns undefined and calls nothing", () => {
 	const platform = fakePlatform();
 	let capture;
+	let entered = false;
 	let inner = "unset";
 	const remove = platform.surface.object.removeEventListener;
 	platform.surface.object.removeEventListener = function (...args) {
-		if (inner === "unset") inner = capture.close();
+		if (!entered) {
+			entered = true;
+			inner = capture.close();
+		}
 		return remove.apply(this, args);
 	};
 	({ capture } = openCapture(declarationOver(platform).declaration));
