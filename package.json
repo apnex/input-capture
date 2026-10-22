@@ -1,0 +1,38 @@
+{
+  "name": "@apnex/input-capture",
+  "version": "0.1.0",
+  "description": "Turn each input event a platform delivers on one surface into one uniform fact, in the application's coordinates, and carry the application's answer for that fact back to the platform.",
+  "license": "MIT",
+  "author": "apnex",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/apnex/input-capture.git"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "VISION.md",
+    "CONTRACT.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "node tools/clean-dist.mjs && tsc -p .",
+    "prepack": "npm run build",
+    "test": "npm run build && node --test \"test/**/*.test.js\"",
+    "gate": "npm test && node tools/check-vocabulary.mjs && node tools/check-source.mjs && node tools/check-runtime.mjs && node tools/check-clock-and-chance.mjs && node tools/check-export-map.mjs && node tools/check-style.mjs",
+    "consumer": "node tools/consumer-test.mjs"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}
