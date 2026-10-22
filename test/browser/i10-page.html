@@ -6,11 +6,14 @@
 <script type="importmap">{ "imports": { "@apnex/input-capture": "/dist/index.js" } }</script>
 <style>
 html, body { margin: 0; }
-svg { display: block; touch-action: none; background: #eee; }
+svg { position: absolute; left: 40px; top: 20px; display: block; touch-action: none; background: #eee; }
 </style>
 </head>
 <body>
-<svg id="surface" width="400" height="300"><rect id="child" x="50" y="50" width="100" height="100" fill="#c33"/></svg>
+<!-- the surface lies 40 px right and 20 px down the page, 400 by 300 screen pixels showing a viewBox of 200 by 150
+drawing units from (-100, -50): a screen point (x, y) lies at ((x - 40) / 2 - 100, (y - 20) / 2 - 50) in the drawing,
+so the conversion's answer differs from the screen point everywhere; the child covers screen 50 to 150 on both axes -->
+<svg id="surface" width="400" height="300" viewBox="-100 -50 200 150"><rect id="child" x="-95" y="-35" width="50" height="50" fill="#c33"/></svg>
 <script type="module" src="/test/browser/i10-page.js"></script>
 </body>
 </html>
