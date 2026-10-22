@@ -4,6 +4,7 @@
 // and removed by close; and which events, by the lifecycle, make facts.
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import vm from "node:vm";
 
 import { openCapture } from "@apnex/input-capture";
 import { declarationOver, fakeObject, fakePlatform, keyEvent, pointerEvent } from "../support/fakes.js";
@@ -40,6 +41,12 @@ test("I1: openCapture never throws while it judges, and refuses a value that is 
 	assert.deepEqual(problemsOf(), [p("", "not-an-object")], "no argument at all");
 	assert.equal(openCapture(Object.assign(Object.create(null), valid())).ok, true, "a null prototype is plain");
 	assert.equal(openCapture({ ...valid(), [Symbol("s")]: 1 }).ok, true, "a symbol-named property is ignored");
+});
+
+test("IC2 rule 1: a declaration from another realm has that realm's Object.prototype, so it is not a plain object; its surface may come from anywhere", () => {
+	const foreign = vm.runInNewContext("({ surface: { addEventListener() {}, removeEventListener() {}, setPointerCapture() {} }, toDrawing: (s) => s, deliver() {} })");
+	assert.deepEqual(problemsOf(foreign), [p("", "not-an-object")]);
+	assert.equal(openCapture({ surface: foreign.surface, toDrawing: (s) => s, deliver() {} }).ok, true, "a foreign surface is an object like any other");
 });
 
 test("I1: a declaration whose descriptor read throws is not-an-object at \"\", no later descriptor read and no member read", () => {

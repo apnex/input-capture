@@ -51,6 +51,10 @@ if (!opened.ok) throw new Error(JSON.stringify(opened.problems));
 A fact holds `type`, `at` and `screen`, your `hit` or `focus` answer, `button`, `buttons`, `pointerId`, `pointerType`, `key`, `code`, `repeat` and the modifiers, each `null` where its family carries none; it holds `at` and `button` as own data properties, so it can be handed to `input-binding` as it is.\
 `opened.capture.close()` removes every listener the capture added; `CONTRACT.md` gives each rule, IC1 to IC9.
 
+Two refusals the types cannot show.\
+Without `exactOptionalPropertyTypes`, the types accept `undefined` for an optional member such as `keys`, `hit` or `focus`, but `openCapture` refuses a member present as `undefined`, so omit the member instead.\
+A declaration made in another realm -- an iframe's object, or one `node:vm` made -- has that realm's `Object.prototype`, so `openCapture` refuses it as not a plain object; make the declaration in the realm that calls `openCapture`, its surface and key source being free to come from anywhere.
+
 In a test, hand it plain objects of the platform's shape instead of a browser's:
 ```js
 const listeners = new Map();
