@@ -46,9 +46,18 @@ if (typeof globalThis.WebSocket !== "function") {
 		await sleep(30);
 	};
 	const key = (type, k, code, extra = {}) => chrome.send("Input.dispatchKeyEvent", { type, key: k, code, ...extra });
-	/** The facts delivered since the last call, each as the page recorded it. */
+	/**
+	 * The facts delivered since the last call, each as the page recorded it: read once the count has held
+	 * still for 100 milliseconds, or after 3 seconds, so a slow runner's input pipeline is waited for.
+	 */
 	const facts = async () => {
-		await sleep(50);
+		let count = -1;
+		for (let waited = 0; waited < 3000; waited += 50) {
+			await sleep(50);
+			const now = await chrome.evaluate("page.facts.length");
+			if (now === count && waited >= 100) break;
+			count = now;
+		}
 		return JSON.parse(await chrome.evaluate("JSON.stringify(page.facts.splice(0))"));
 	};
 	const policy = (value) => chrome.evaluate(`page.policy = ${JSON.stringify(value)}`);
