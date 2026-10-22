@@ -91,6 +91,10 @@ A fake browser whose writer outlives its leader reproduced both locally -- the o
 - `test/browser/teardown.test.js` holds it over `fake-browser.mjs`: stopping the group ends a writer that outlives its leader and the profile is then removed; a profile that cannot be removed is a warning, never an exception; and the server's close ends kept-alive connections at once and never throws.
 - The consumer test runs Chrome the same way -- detached, its group killed once it answers or after 90 seconds -- closes the server's connections, and warns rather than fails over a scratch directory it cannot remove.
 
+**The tag `v0.1.0`, moved before any release.**\
+`v0.1.0` was first pushed at `2312478`; its release run failed in I10's teardown before it drafted anything, so no release of `v0.1.0` ever existed, published or draft, and no consumer could have pinned its file.\
+The tag was deleted and pushed again at the commit holding the teardown's fix, by the repository's administrator, the one bypass the tag ruleset allows; a release, once published, is never replaced (draw's design, D9).
+
 Measured by `tools/measure-size.mjs` over `dist/` as built after the run-verifier's notes, as the design's section 7 asks: every built module is loaded wherever `openCapture` is imported.\
 Bytes as shipped, comments included, then with comments removed, each also gzipped at level 9:
 
