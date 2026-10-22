@@ -14,10 +14,12 @@
 // element's setPointerCapture refuses the synthetic pointer, so takePointer answers false.
 //
 // Chrome is $CHROME, or google-chrome on PATH. It runs with a profile of its own in a scratch directory,
-// so it never touches another Chrome on the machine. Nothing here needs an npm dependency.
+// so it never touches another Chrome on the machine, detached in a process group of its own that is killed
+// whole once it answers; the server's connections are closed, and a scratch directory that cannot be
+// removed is a warning, never a failure. Nothing here needs an npm dependency.
 //
 // Usage:  node tools/consumer-test.mjs [--tarball FILE] [--keep]    (or INPUT_CAPTURE_TARBALL=FILE)
-import { execFile, execFileSync } from "node:child_process";
+import { execFile, execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
@@ -37,6 +39,50 @@ const fail = (message) => {
 	throw new Error(message);
 };
 const step = (message) => console.log(`  ${message}`);
+
+/**
+ * Runs Chrome detached, the leader of a process group of its own, answering its stdout once it exits; on
+ * its exit or after `timeoutMs` the whole group is killed, so none of Chrome's own processes outlives the
+ * run to write to its profile or hold a connection to the server open.
+ */
+function runChrome(command, args, timeoutMs) {
+	return new Promise((resolve, reject) => {
+		const child = spawn(command, args, { stdio: ["ignore", "pipe", "ignore"], detached: true });
+		const killGroup = () => {
+			try {
+				process.kill(-child.pid, "SIGKILL");
+			} catch {
+				// the group has ended
+			}
+		};
+		let stdout = "";
+		child.stdout.setEncoding("utf8");
+		child.stdout.on("data", (chunk) => (stdout += chunk));
+		const timer = setTimeout(() => {
+			killGroup();
+			reject(new Error(`Chrome gave no answer in ${timeoutMs / 1000} seconds`));
+		}, timeoutMs);
+		child.on("error", (error) => {
+			clearTimeout(timer);
+			reject(error);
+		});
+		child.on("close", (code, signal) => {
+			clearTimeout(timer);
+			killGroup();
+			if (code === 0) resolve({ stdout });
+			else reject(new Error(`Chrome exited ${code ?? signal}`));
+		});
+	});
+}
+
+/** Removes the scratch directory with retries; one that still cannot be removed is a warning, never a failure. */
+function removeScratch(dir) {
+	try {
+		fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+	} catch (error) {
+		process.stderr.write(`consumer-test: warning: left the scratch directory ${dir}: ${error?.message ?? error}\n`);
+	}
+}
 
 /**
  * What a consumer does with the package, run in Node and in Chrome alike: open a capture on the platform's
@@ -198,7 +244,7 @@ ${exercise.toString()}
 		const chrome = process.env.CHROME || "google-chrome";
 		const profile = path.join(scratch, "chrome-profile");
 		const args = ["--headless=new", "--no-sandbox", "--disable-gpu", "--no-first-run", "--no-default-browser-check", "--disable-extensions", `--user-data-dir=${profile}`, "--virtual-time-budget=10000", "--dump-dom", address];
-		const { stdout: dom } = await run(chrome, args, { timeout: 90000, maxBuffer: 1 << 24 });
+		const { stdout: dom } = await runChrome(chrome, args, 90000);
 		const result = dom.match(/<pre id="result">([^<]*)<\/pre>/)?.[1] ?? "";
 		const missed = requests.filter((r) => r.status !== 200 && r.path !== "/favicon.ico");
 		if (missed.length) fail(`requests not answered 200: ${missed.map((r) => `${r.path} ${r.status}`).join(", ")}`);
@@ -208,6 +254,7 @@ ${exercise.toString()}
 		step(`${version.trim()} loaded ${specifiers.join(" and ")} through the import map: ${requests.length} requests, every one asked of the page answered 200`);
 		step(`the page says: ${result}`);
 	} finally {
+		server.closeAllConnections();
 		server.close();
 	}
 	console.log("consumer-test: PASS");
@@ -221,6 +268,6 @@ try {
 		process.exitCode = 1;
 	}
 } finally {
-	if (!keep) fs.rmSync(scratch, { recursive: true, force: true });
+	if (!keep) removeScratch(scratch);
 	else console.log(`  kept ${scratch}`);
 }

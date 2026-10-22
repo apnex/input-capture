@@ -26,6 +26,8 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    # a backstop: a hang fails the run rather than holding a runner for hours
+    timeout-minutes: 15
     # gh api takes no --repo: every call below names repos/$GITHUB_REPOSITORY in its path, and GH_REPO
     # names it too, so no call relies on the checkout's remote
     env:

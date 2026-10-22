@@ -8,6 +8,10 @@
 // a debugging port of its own (chrome-driver.js), and driven over Node.js's global WebSocket. Where a
 // Node.js has no global WebSocket -- 22.0 to 22.3, which keep it behind a flag -- the file runs itself
 // again with --experimental-websocket.
+//
+// Every test and hook has a timeout, so a hang fails rather than runs on; the after hook ends Chrome's
+// whole process group and closes the server in finally blocks, so its cleanup can neither fail the run
+// nor leave a handle holding it open.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
@@ -20,11 +24,12 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", ".
 
 if (typeof globalThis.WebSocket !== "function") {
 	test("I10, run again with --experimental-websocket, since this Node.js keeps its WebSocket behind the flag", () => {
-		const run = spawnSync(process.execPath, ["--experimental-websocket", "--test", fileURLToPath(import.meta.url)], { stdio: "inherit" });
+		const run = spawnSync(process.execPath, ["--experimental-websocket", "--test", fileURLToPath(import.meta.url)], { stdio: "inherit", timeout: 300000, killSignal: "SIGKILL" });
 		assert.equal(run.status, 0);
 	});
 } else {
 	let chrome, server;
+	const TEST = { timeout: 30000 };
 
 	before(async () => {
 		server = await serveRepository(root);
@@ -35,12 +40,15 @@ if (typeof globalThis.WebSocket !== "function") {
 		for (let i = 0; i < 200 && !(await chrome.evaluate("globalThis.page?.ready === true")); i++) await sleep(50);
 		assert.equal(await chrome.evaluate("globalThis.page?.ready === true"), true, "the page opened its capture");
 		assert.equal(await chrome.evaluate("JSON.stringify(page.refused)"), "null", "openCapture accepted an SVG element and the window");
-	});
+	}, { timeout: 60000 });
 
 	after(async () => {
-		await chrome?.close();
-		await server?.close();
-	});
+		try {
+			await chrome?.close();
+		} finally {
+			await server?.close();
+		}
+	}, { timeout: 30000 });
 
 	const mouse = (type, x, y, button = "none", buttons = 0, clickCount = 0) => chrome.send("Input.dispatchMouseEvent", { type, x, y, button, buttons, clickCount });
 	const touch = async (type, touchPoints) => {
@@ -84,7 +92,7 @@ if (typeof globalThis.WebSocket !== "function") {
 		return facts();
 	}
 
-	test("I10: a left press whose pointer is taken -- every move and the release delivered, off the surface too, each fact frozen, at a DOMPoint's numbers", async () => {
+	test("I10: a left press whose pointer is taken -- every move and the release delivered, off the surface too, each fact frozen, at a DOMPoint's numbers", TEST, async () => {
 		const got = await dragOffTheSurface(true);
 		const moves = only(got, "down", "move", "up");
 		assert.deepEqual(moves.map((f) => [f.type, ...f.screen]), [["down", 100, 100], ["move", 300, 200], ["move", 600, 500], ["up", 600, 500]]);
@@ -99,7 +107,7 @@ if (typeof globalThis.WebSocket !== "function") {
 		assert.ok(got.every((f) => f.key === null && f.code === null && f.repeat === null && f.focus === null));
 	});
 
-	test("I10: the same press not taken -- nothing delivered off the surface but the out and the leave reporting the exit", async () => {
+	test("I10: the same press not taken -- nothing delivered off the surface but the out and the leave reporting the exit", TEST, async () => {
 		const got = await dragOffTheSurface(false);
 		assert.deepEqual(only(got, "down", "move", "up").map((f) => [f.type, ...f.screen]), [["down", 100, 100], ["move", 300, 200]]);
 		assert.deepEqual(got.filter((f) => !ON(f.screen)).map((f) => f.type), ["out", "leave"], "off the surface, only the exit is reported");
@@ -107,7 +115,7 @@ if (typeof globalThis.WebSocket !== "function") {
 		assert.ok(converted(got));
 	});
 
-	test("I10: a right press and release, button 2; a move with no button, button -1 and buttons 0", async () => {
+	test("I10: a right press and release, button 2; a move with no button, button -1 and buttons 0", TEST, async () => {
 		await mouse("mouseMoved", 200, 200);
 		await facts();
 		await mouse("mousePressed", 200, 200, "right", 2, 1);
@@ -120,7 +128,7 @@ if (typeof globalThis.WebSocket !== "function") {
 		assert.ok(converted([...right, ...move]));
 	});
 
-	test("I10: a double click -- one double after its presses and releases, pointerId and pointerType null", async () => {
+	test("I10: a double click -- one double after its presses and releases, pointerId and pointerType null", TEST, async () => {
 		await mouse("mouseMoved", 250, 250);
 		await facts();
 		for (const n of [1, 2]) {
@@ -134,7 +142,7 @@ if (typeof globalThis.WebSocket !== "function") {
 		assert.ok(converted(got));
 	});
 
-	test("I10: a leave when the pointer leaves the surface", async () => {
+	test("I10: a leave when the pointer leaves the surface", TEST, async () => {
 		await mouse("mouseMoved", 250, 250);
 		await facts();
 		await mouse("mouseMoved", 600, 500);
@@ -143,7 +151,7 @@ if (typeof globalThis.WebSocket !== "function") {
 		assert.ok(converted(got), "the conversion runs on a leave too");
 	});
 
-	test("I10: touch -- a touch pressed on a child and not taken, its moves and release off the surface delivered with the child as target", async () => {
+	test("I10: touch -- a touch pressed on a child and not taken, its moves and release off the surface delivered with the child as target", TEST, async () => {
 		await chrome.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 2 });
 		await sleep(100);
 		await facts();
@@ -157,7 +165,7 @@ if (typeof globalThis.WebSocket !== "function") {
 		assert.ok(converted(got));
 	});
 
-	test("I10: two touch contacts, two pointerId values, pointerType touch; a touch cancelled, a cancel", async () => {
+	test("I10: two touch contacts, two pointerId values, pointerType touch; a touch cancelled, a cancel", TEST, async () => {
 		await touch("touchStart", [{ x: 100, y: 200, id: 1 }]);
 		await touch("touchStart", [{ x: 100, y: 200, id: 1 }, { x: 300, y: 200, id: 2 }]);
 		await touch("touchEnd", []);
@@ -173,7 +181,7 @@ if (typeof globalThis.WebSocket !== "function") {
 		await sleep(100);
 	});
 
-	test("I10: a key held to repeat, its key and code, and a key-up; a claimed key-down seen defaultPrevented by a later listener", async () => {
+	test("I10: a key held to repeat, its key and code, and a key-up; a claimed key-down seen defaultPrevented by a later listener", TEST, async () => {
 		await policy({ take: false, claim: ["q"] });
 		await facts();
 		await chrome.evaluate("page.later.length = 0");
@@ -189,7 +197,7 @@ if (typeof globalThis.WebSocket !== "function") {
 		assert.deepEqual(JSON.parse(await chrome.evaluate("JSON.stringify(page.later)")), [{ key: "a", defaultPrevented: false }, { key: "a", defaultPrevented: false }, { key: "q", defaultPrevented: true }]);
 	});
 
-	test("I10: nothing after close -- close answers undefined, and no press, move, release or key delivers a fact", async () => {
+	test("I10: nothing after close -- close answers undefined, and no press, move, release or key delivers a fact", TEST, async () => {
 		assert.equal(await chrome.evaluate("String(page.capture.close())"), "undefined");
 		assert.equal(await chrome.evaluate("String(page.capture.close())"), "undefined", "a second close does nothing");
 		await mouse("mouseMoved", 100, 100);

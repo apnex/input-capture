@@ -6,6 +6,14 @@
 // a free one and writes it to DevToolsActivePort in that profile -- so it never touches another Chrome on
 // the machine. A static server answers the repository's files, so the page loads the built package
 // through an import map.
+//
+// Teardown can neither fail the run nor hang it. Chrome is spawned detached, the leader of a process group
+// of its own, and the whole group is killed -- its renderer, GPU, network, crashpad and zygote processes
+// with it, which outlive a kill of the main process alone and go on writing to the profile -- and the wait
+// for the group to end is bounded. The profile is removed with retries, and a profile that still cannot be
+// removed is a warning on stderr, never a failure: a leftover scratch directory is no fault of the
+// component. The static server is unreferenced and its connections closed, the socket closed, each in a
+// finally, so no cleanup error leaves a handle holding the process open.
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import http from "node:http";
@@ -14,8 +22,9 @@ import path from "node:path";
 
 const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".map": "application/json" };
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const warnOnStderr = (message) => process.stderr.write(`chrome-driver: warning: ${message}\n`);
 
-/** A static server of the repository's test/browser/ and dist/ files, on a port of its own. */
+/** A static server of the repository's test/browser/ and dist/ files, on a port of its own; close() ends every connection and never throws. */
 export async function serveRepository(root) {
 	const server = http.createServer((req, res) => {
 		const url = new URL(req.url, "http://localhost");
@@ -31,24 +40,97 @@ export async function serveRepository(root) {
 		res.end(fs.readFileSync(file));
 	});
 	await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-	return { origin: `http://127.0.0.1:${server.address().port}`, close: () => new Promise((resolve) => server.close(resolve)) };
+	// the server never holds the process open by itself
+	server.unref();
+	return { origin: `http://127.0.0.1:${server.address().port}`, close: () => closeServer(server) };
+}
+
+/** Closes a server, ending its kept-alive connections, waiting at most `boundMs` for it; never throws. */
+export async function closeServer(server, boundMs = 2000) {
+	try {
+		server.closeAllConnections?.();
+		await Promise.race([new Promise((resolve) => server.close(() => resolve())), sleep(boundMs)]);
+	} catch (error) {
+		warnOnStderr(`the static server did not close cleanly: ${error?.message ?? error}`);
+	}
+}
+
+/** True while any process of the group led by `pid` is alive. */
+function groupAlive(pid) {
+	try {
+		process.kill(-pid, 0);
+		return true;
+	} catch (error) {
+		return error.code === "EPERM";
+	}
+}
+
+/**
+ * Spawns a command detached, the leader of a process group of its own, unreferenced so it never holds the
+ * process open; answers the child, whether it has exited, and stop().
+ */
+export function launchGroup(command, args) {
+	const child = spawn(command, args, { stdio: "ignore", detached: true });
+	let exited = null;
+	child.on("exit", (code, signal) => (exited = { code, signal }));
+	child.on("error", (error) => (exited = { error: error.message }));
+	child.unref();
+	return { child, exited: () => exited, stop: (boundMs) => stopGroup(child, boundMs) };
+}
+
+/**
+ * Kills a detached child's whole process group -- falling back to the child alone where the group cannot
+ * be signalled -- and waits at most `boundMs` for the group to end; answers whether it ended. Never throws.
+ */
+export async function stopGroup(child, boundMs = 5000) {
+	if (child.pid === undefined) return true;
+	try {
+		process.kill(-child.pid, "SIGKILL");
+	} catch {
+		try {
+			child.kill("SIGKILL");
+		} catch {
+			// already gone
+		}
+	}
+	for (let waited = 0; waited < boundMs; waited += 25) {
+		if (!groupAlive(child.pid)) return true;
+		await sleep(25);
+	}
+	warnOnStderr(`process group ${child.pid} still had a live process after ${boundMs} ms`);
+	return false;
+}
+
+/** Removes a scratch directory with retries; one that still cannot be removed is a warning, never a failure. Answers whether it went. */
+export function removeProfile(profile, warn = warnOnStderr) {
+	try {
+		fs.rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+		return true;
+	} catch (error) {
+		warn(`left the scratch profile ${profile}: ${error?.code ?? ""} ${error?.message ?? error}`);
+		return false;
+	}
 }
 
 /** Launches headless Chrome with a profile and a debugging port of its own, and connects to its first page. */
 export async function launchChrome() {
 	const profile = fs.mkdtempSync(path.join(os.tmpdir(), "input-capture-i10-"));
-	const chrome = spawn(process.env.CHROME || "google-chrome", ["--headless=new", "--no-sandbox", "--disable-gpu", "--no-first-run", "--no-default-browser-check", "--disable-extensions", "--window-size=800,600", `--user-data-dir=${profile}`, "--remote-debugging-port=0", "about:blank"], { stdio: "ignore" });
-	let exited = null;
-	chrome.on("exit", (code, signal) => (exited = { code, signal }));
+	const chrome = launchGroup(process.env.CHROME || "google-chrome", ["--headless=new", "--no-sandbox", "--disable-gpu", "--no-first-run", "--no-default-browser-check", "--disable-extensions", "--window-size=800,600", `--user-data-dir=${profile}`, "--remote-debugging-port=0", "about:blank"]);
+	let stopped = false;
+	/** Ends Chrome's whole process group, then removes its profile; idempotent, and never throws. */
 	const stop = async () => {
-		if (exited === null) chrome.kill("SIGKILL");
-		for (let i = 0; i < 50 && exited === null; i++) await sleep(20);
-		fs.rmSync(profile, { recursive: true, force: true });
+		if (stopped) return;
+		stopped = true;
+		try {
+			await chrome.stop();
+		} finally {
+			removeProfile(profile);
+		}
 	};
 	try {
 		let port = null;
 		for (let i = 0; i < 300 && port === null; i++) {
-			if (exited !== null) throw new Error(`Chrome exited before it listened: ${JSON.stringify(exited)}`);
+			if (chrome.exited() !== null) throw new Error(`Chrome exited before it listened: ${JSON.stringify(chrome.exited())}`);
 			try {
 				port = Number(fs.readFileSync(path.join(profile, "DevToolsActivePort"), "utf8").split("\n")[0]) || null;
 			} catch {
@@ -66,7 +148,14 @@ export async function launchChrome() {
 		}
 		if (!target) throw new Error("Chrome showed no page target");
 		const session = await connect(target.webSocketDebuggerUrl);
-		return { ...session, close: async () => (session.socket.close(), await stop()) };
+		const close = async () => {
+			try {
+				session.close();
+			} finally {
+				await stop();
+			}
+		};
+		return { ...session, pid: chrome.child.pid, profile, close };
 	} catch (error) {
 		await stop();
 		throw error;
@@ -106,7 +195,20 @@ async function connect(url) {
 		if (exceptionDetails) throw new Error(`the page threw: ${exceptionDetails.exception?.description ?? exceptionDetails.text}`);
 		return result.value;
 	};
-	return { socket, send, evaluate };
+	/** Closes the socket and fails every call still waiting; never throws. */
+	const close = () => {
+		try {
+			socket.close();
+		} catch {
+			// already closed
+		} finally {
+			for (const [id, waiting] of pending) {
+				pending.delete(id);
+				waiting.reject(new Error(`${waiting.method}: the session closed`));
+			}
+		}
+	};
+	return { socket, send, evaluate, close };
 }
 
 export { sleep };

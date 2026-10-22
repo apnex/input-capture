@@ -81,7 +81,16 @@ An independent run-verifier sealed the build and left seven notes; each is settl
 3. IC1 says the surface's and the key source's members are each "read once"; when the key source is the surface, its `addEventListener` and `removeEventListener` are read twice, once in each role, as IC2 rule 2 orders the reads. The sentence should say once for each role.
 4. IC8 says a spent claim's "every later call returns `undefined`" and a decided `takePointer`'s "every later call answers the first call's answer", and also that "once the reply is no longer live, each throws"; for a call made after delivery has ended on a reply spent while it was live, the build lets the second rule win, the reply checking that it is live before anything else. The sentences should say so.
 
-**The built size.**\
+**After the release run of `v0.1.0` failed.**\
+The first release run passed all nine I10 tests and then failed in I10's after hook: `fs.rmSync` of Chrome's profile threw `ENOTEMPTY` for its `Default` directory, since a kill of Chrome's main process alone left its storage, network, GPU and renderer processes alive and writing there; the throw skipped the static server's close, whose listening socket held the test process open, and the job hung until it was cancelled.\
+A fake browser whose writer outlives its leader reproduced both locally -- the old teardown failed with `ENOTEMPTY` in two of five rounds, left the writer alive in all five, and its after hook's process was still running five seconds on -- and the teardown now holds against it:
+- Chrome is spawned detached, the leader of a process group of its own, and unreferenced; the whole group is killed with `SIGKILL`, falling back to the main process alone where the group cannot be signalled, and the wait for the group to end is bounded at five seconds. Chrome's crash handlers are in sessions of their own and outside the group, but they name no profile, write their database elsewhere, and end with their client.
+- The profile is removed with ten retries 100 milliseconds apart; one that still cannot be removed is a warning on stderr, never a failure, since a leftover scratch directory is no fault of the component.
+- The static server is unreferenced and its kept-alive connections closed with it, the close bounded at two seconds and never throwing; the session's socket is closed, and every call still waiting on it failed; the after hook closes Chrome and then the server in a `finally`.
+- Every I10 test has a 30-second timeout, the before hook 60 seconds and the after hook 30, and the run of the file again with `--experimental-websocket` 300 seconds, so a hang fails rather than runs on; each job of `gate.yml` and `release.yml` has `timeout-minutes: 15` as a backstop.
+- `test/browser/teardown.test.js` holds it over `fake-browser.mjs`: stopping the group ends a writer that outlives its leader and the profile is then removed; a profile that cannot be removed is a warning, never an exception; and the server's close ends kept-alive connections at once and never throws.
+- The consumer test runs Chrome the same way -- detached, its group killed once it answers or after 90 seconds -- closes the server's connections, and warns rather than fails over a scratch directory it cannot remove.
+
 Measured by `tools/measure-size.mjs` over `dist/` as built after the run-verifier's notes, as the design's section 7 asks: every built module is loaded wherever `openCapture` is imported.\
 Bytes as shipped, comments included, then with comments removed, each also gzipped at level 9:
 
