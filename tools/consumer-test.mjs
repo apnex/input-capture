@@ -7,11 +7,12 @@
 // serves the installed files with a small static server and loads every export in headless Chrome
 // through an import map made as draw makes its own: one entry per export, never a trailing-slash prefix,
 // each export's address carrying the package's version. In Node and in the page alike, the exercise
-// below opens a capture, delivers a pointer press and a key press through it, claims both and takes the
-// pointer, closes it, and finds one more press delivers nothing: in Node over plain-object fakes, whose
-// setPointerCapture agrees, and in the page over an element, dispatching a constructed PointerEvent and
-// a constructed key event -- real event objects, whose fields are inherited accessors -- where the
-// element's setPointerCapture refuses the synthetic pointer, so takePointer answers false.
+// below opens a capture listing the wheel and focus loss, delivers a pointer press, a key press, a wheel
+// turn and a focus loss through it, claims each and takes the pointer, closes it, and finds one more press
+// and one more turn deliver nothing: in Node over plain-object fakes, whose setPointerCapture agrees, and
+// in the page over an element, dispatching a constructed PointerEvent, key event, WheelEvent and FocusEvent
+// -- real event objects, whose fields are inherited accessors -- where the element's setPointerCapture
+// refuses the synthetic pointer, so takePointer answers false.
 //
 // Chrome is $CHROME, or google-chrome on PATH. It runs with a profile of its own in a scratch directory,
 // so it never touches another Chrome on the machine, detached in a process group of its own that is killed
@@ -86,14 +87,16 @@ function removeScratch(dir) {
 
 /**
  * What a consumer does with the package, run in Node and in Chrome alike: open a capture on the platform's
- * surface and key source, deliver a pointer press and a key press, claim both and take the pointer, close
- * the capture, and press again. `platform` makes and dispatches the events. Answers a summary, or throws.
+ * surface and key source, listening also for the wheel and focus loss; deliver a pointer press, a key press, a
+ * wheel turn and a focus loss, claim each and take the pointer; close the capture, and press and turn again.
+ * `platform` makes and dispatches the events. Answers a summary, or throws.
  */
 function exercise(openCapture, platform) {
 	const facts = [];
 	const opened = openCapture({
 		surface: platform.surface,
 		keys: platform.keys,
+		listen: ["blur", "wheel"],
 		toDrawing: (screen) => ({ x: screen.x / 2, y: screen.y / 2 }),
 		hit: (target) => (target === platform.surface ? "surface" : "elsewhere"),
 		focus: () => "focused",
@@ -106,31 +109,39 @@ function exercise(openCapture, platform) {
 	if (!opened.ok) throw new Error("openCapture refused: " + JSON.stringify(opened.problems));
 	const down = platform.press({ clientX: 10, clientY: 20, button: 0, buttons: 1, pointerId: 42, pointerType: "mouse", shiftKey: true });
 	const key = platform.key({ key: "a", code: "KeyA", repeat: true });
+	const turned = platform.wheel({ clientX: 30, clientY: 40, deltaX: 0, deltaY: -2.5, deltaZ: 0, deltaMode: 1, ctrlKey: true });
+	platform.blur();
 	opened.capture.close();
 	platform.press({ clientX: 1, clientY: 1, button: 0, buttons: 1, pointerId: 43, pointerType: "mouse" });
-	const [pointer, taken, keyed] = facts;
+	platform.wheel({ clientX: 1, clientY: 1, deltaY: 1 });
+	const [pointer, taken, keyed, wheel, blur] = facts;
 	const wrong = [];
-	if (facts.length !== 3) wrong.push(facts.length + " deliveries");
-	if (!pointer || pointer.type !== "down" || pointer.at.x !== 5 || pointer.at.y !== 10 || pointer.screen.x !== 10 || pointer.hit !== "surface" || pointer.button !== 0 || pointer.buttons !== 1 || pointer.pointerId !== 42 || pointer.pointerType !== "mouse" || pointer.shiftKey !== true || pointer.key !== null) wrong.push("the pointer fact " + JSON.stringify(pointer));
-	if (!keyed || keyed.type !== "key-down" || keyed.key !== "a" || keyed.code !== "KeyA" || keyed.repeat !== true || keyed.focus !== "focused" || keyed.at !== null || keyed.button !== null) wrong.push("the key fact " + JSON.stringify(keyed));
-	if (!Object.isFrozen(pointer) || !Object.isFrozen(pointer.at) || !Object.isFrozen(keyed)) wrong.push("a fact not frozen");
-	if (!down.defaultPrevented || !key.defaultPrevented) wrong.push("a claim not done");
+	const timed = (fact) => typeof fact.time === "number" && Number.isFinite(fact.time);
+	if (facts.length !== 5) wrong.push(facts.length + " deliveries");
+	if (!pointer || pointer.type !== "down" || pointer.at.x !== 5 || pointer.at.y !== 10 || pointer.screen.x !== 10 || pointer.hit !== "surface" || pointer.button !== 0 || pointer.buttons !== 1 || pointer.pointerId !== 42 || pointer.pointerType !== "mouse" || pointer.shiftKey !== true || pointer.key !== null || pointer.deltaY !== null || !timed(pointer)) wrong.push("the pointer fact " + JSON.stringify(pointer));
+	if (!keyed || keyed.type !== "key-down" || keyed.key !== "a" || keyed.code !== "KeyA" || keyed.repeat !== true || keyed.focus !== "focused" || keyed.at !== null || keyed.button !== null || !timed(keyed)) wrong.push("the key fact " + JSON.stringify(keyed));
+	if (!wheel || wheel.type !== "wheel" || wheel.at.x !== 15 || wheel.deltaY !== -2.5 || wheel.deltaMode !== 1 || wheel.ctrlKey !== true || wheel.hit !== "surface" || !timed(wheel)) wrong.push("the wheel fact " + JSON.stringify(wheel));
+	if (!blur || blur.type !== "blur" || blur.at !== null || blur.hit !== null || blur.focus !== null || blur.shiftKey !== false || !timed(blur)) wrong.push("the blur fact " + JSON.stringify(blur));
+	if (facts.some((fact) => typeof fact === "object" && Object.keys(fact).length !== 21)) wrong.push("a fact without twenty-one properties");
+	if (!Object.isFrozen(pointer) || !Object.isFrozen(pointer.at) || !Object.isFrozen(keyed) || !Object.isFrozen(wheel) || !Object.isFrozen(blur)) wrong.push("a fact not frozen");
+	if (!down.defaultPrevented || !key.defaultPrevented || !turned.defaultPrevented) wrong.push("a claim not done");
 	if (taken !== platform.takes) wrong.push("takePointer answered " + taken);
 	if (wrong.length) throw new Error("the package answered wrongly: " + wrong.join("; "));
-	return ["down:" + pointer.at.x + "," + pointer.at.y + ":" + pointer.hit + ":" + pointer.pointerType + ":" + pointer.pointerId, "taken=" + taken, "key-down:" + keyed.key + ":" + keyed.code + ":repeat", "claimed", "closed"].join(",");
+	return ["down:" + pointer.at.x + "," + pointer.at.y + ":" + pointer.hit + ":" + pointer.pointerType + ":" + pointer.pointerId, "taken=" + taken, "key-down:" + keyed.key + ":" + keyed.code + ":repeat", "wheel:" + wheel.deltaY + ":" + wheel.deltaMode, "blur", "claimed", "closed"].join(",");
 }
 
 /** The Node platform: plain-object fakes, whose setPointerCapture agrees. */
 const NODE_PLATFORM = `const listeners = new Map();
 const fake = (tag) => ({ addEventListener: (name, listener) => listeners.set(tag + ":" + name, listener), removeEventListener: (name, listener) => { if (listeners.get(tag + ":" + name) === listener) listeners.delete(tag + ":" + name); }, setPointerCapture: () => undefined });
 const surface = fake("surface"), keys = fake("keys");
-const dispatch = (key, init) => { const event = { ...init, target: surface, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; } }; const listener = listeners.get(key); if (listener) listener(event); return event; };
-const platform = { surface, keys, takes: true, press: (init) => dispatch("surface:pointerdown", init), key: (init) => dispatch("keys:keydown", init) };`;
+let clock = 0;
+const dispatch = (key, init) => { const event = { ...init, timeStamp: ++clock, target: surface, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; } }; const listener = listeners.get(key); if (listener) listener(event); return event; };
+const platform = { surface, keys, takes: true, press: (init) => dispatch("surface:pointerdown", init), key: (init) => dispatch("keys:keydown", init), wheel: (init) => dispatch("surface:wheel", init), blur: () => dispatch("keys:blur", {}) };`;
 
 /** The page's platform: an element, constructed events dispatched on it, and its setPointerCapture refusing the synthetic pointer. */
 const PAGE_PLATFORM = `const element = document.getElementById("surface");
 const dispatch = (event) => { element.dispatchEvent(event); return event; };
-const platform = { surface: element, keys: element, takes: false, press: (init) => dispatch(new PointerEvent("pointerdown", { ...init, bubbles: true, cancelable: true })), key: (init) => dispatch(new KeyboardEvent("keydown", { ...init, bubbles: true, cancelable: true })) };`;
+const platform = { surface: element, keys: element, takes: false, press: (init) => dispatch(new PointerEvent("pointerdown", { ...init, bubbles: true, cancelable: true })), key: (init) => dispatch(new KeyboardEvent("keydown", { ...init, bubbles: true, cancelable: true })), wheel: (init) => dispatch(new WheelEvent("wheel", { ...init, bubbles: true, cancelable: true })), blur: () => dispatch(new FocusEvent("blur")) };`;
 
 async function main() {
 	// 1. the tarball given, or build and pack one, as a release does
