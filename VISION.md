@@ -1,6 +1,6 @@
 # input-capture - Vision
 
-**Status: ratified by the director as written, 2026-10-22 (draw's ruling `H26-8`, in draw's `dev/DECISIONS.md`); enduring.**\
+**Status: ratified by the director as written, 2026-10-22 (draw's ruling `H26-8`, in draw's `dev/DECISIONS.md`); amended 2026-10-24 to absorb draw's ruling `H26-14` -- the wheel, the context menu and focus loss as facts a capture asks for, and each fact carrying its event's own time; enduring.**\
 This document states why input-capture exists and what it will never be.\
 It carries no current state, no roadmap, and no schedule.
 
@@ -17,13 +17,13 @@ Applications read a browser's events wherever they need one -- a coordinate here
 `input-capture` holds that boundary once: it listens, reads each event into a fact in the application's own coordinates, and does to the event only what the application asks of the fact.
 
 **What it is.**\
-An embeddable library with one function: open a capture on a surface, hand it the application's conversion, hit test and delivery, and receive one frozen fact for each pointer, double-click and key event, with a reply that can claim the event or take the pointer.
+An embeddable library with one function: open a capture on a surface, hand it the application's conversion, hit test and delivery, and receive one frozen fact for each pointer, double-click and key event -- and, when asked, each wheel turn, context menu and loss of focus -- with a reply that can claim the event or take the pointer.
 
 **What it is not.**
 - Not a binder: what an input means is `input-binding`'s.
 - Not a hit tester or a view: what lies under a point, and where a screen point lies, are the application's.
 - Not a page listener: it listens to the surface and the key source it is given.
-- Not a clock: a fact holds no time.
+- Not a clock: a fact holds no clock reading, only the time the platform stamped on its event.
 - Not a network service: it never listens to or sends anything but events.
 
 **What success means.**
