@@ -202,6 +202,10 @@ Each new rule's tests were run against a mutant of it planted in the working tre
 | M38 | GR1 | an event's `timeStamp` read twice | 3 of 9: I18 alone; it passed I18's first strip |
 | M39 | GR1 | the surface's `timeStamp` read at each pointer event | 4 of 9: I18 alone; it passed I18's first strip |
 | M40 | IC5, IC8 | a `wheel` fact's `pointerId` always `null` | 1 of 15: the wheel carrying a `pointerId` |
+| M41 | teardown | the singleton's directory removed only when named with a leading dot, as before | 1 of 5 teardown tests: the name without one |
+| M42 | teardown | the name unanchored at its start | 1 of 5: `xcom.google.Chrome.` and six, left |
+| M43 | teardown | six or more characters after the prefix | 1 of 5: seven characters, left |
+| M44 | teardown | any number of leading dots | 1 of 5: two dots, left |
 
 **After the run-verifier's seal.**\
 An independent run-verifier sealed the build and left three should-fix findings and two notes; each is settled here:
@@ -210,6 +214,7 @@ An independent run-verifier sealed the build and left three should-fix findings 
 - E3 was settled by the recorder's `4afb580`, and `VISION.md` is among this ruling's Affects.
 - I18's strip took out every `timeStamp` read; it now takes out exactly one of each event, at its IC6 position, so the verifier's V7, a second read, and V11, the surface's, fail I18 alone, as M38 and M39 do.
 - IC1's sentence that a key source's `blur` precedes `visibilitychange` when the page's tab is left is stated as measured for a page holding the window's focus, a page focused only by trusted input hearing no `blur` (E5).
+- After `cb380a7` was pushed, GitHub's gate failed on both Node 22 and Node 24 in the teardown test that launches a real Chrome: the runner's Chrome, later than this machine's Chrome 136, names its singleton socket's directory `com.google.Chrome.` and six characters with no leading dot, which `removeSingleton` did not accept, so the directory was left. `removeSingleton` now accepts the name with or without one leading dot, and the fake-directory test removes both forms and leaves names Chrome does not make -- a letter before `com`, two dots, five or seven characters, another character among the six, another prefix -- and a directory not directly in the scratch directory; M41, the dotted-only pattern restored, fails the name without the dot, and M42 to M44, each looser, fail the names left.
 
 Measured by `tools/measure-size.mjs` over `dist/` as built for `0.2.0`: every built module is loaded wherever `openCapture` is imported.\
 Bytes as shipped, comments included, then with comments removed, each also gzipped at level 9:
