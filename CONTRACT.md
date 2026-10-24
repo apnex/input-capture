@@ -241,7 +241,7 @@ A reply is a frozen `{ claim, takePointer }`, fresh for each fact and *live* fro
 Each acts at once, so what a delivery asked before it threw is done.\
 Claiming a `wheel` fact prevents its scroll and a touchpad pinch's zoom: a pinch synthesized over an unclaimed surface took the page's `visualViewport.scale` from 1 to 2, and over a claimed one left it 1 (measured in headless Chrome); a browser's page zoom on Ctrl and a mouse wheel does not happen in headless Chrome at all, so its prevention is not measured.\
 Claiming a `context-menu` fact prevents the menu: measured in headless Chrome on Linux, which delivers `contextmenu` as a `PointerEvent` with a `pointerId`, after the `pointerdown` and before the `pointerup`; on other systems the menu's event may follow the release, not measured.\
-Claiming a `blur` fact calls `preventDefault`, which changes nothing, the event not being cancelable; a `blur` fact's and a `wheel` fact's `takePointer` answers `false`, their `pointerId` being `null`.\
+Claiming a `blur` fact calls `preventDefault`, which changes nothing, the event not being cancelable; a `blur` fact's `takePointer` answers `false`, its `pointerId` being `null`, and so does a `wheel` fact's when its event carries no `pointerId`, as a browser's `WheelEvent` carries none, while a `wheel` event that carries one makes a fact holding it, whose pointer `takePointer` takes.\
 Tested by: `test/contract/fact-reply.test.js` (I8, I17) and `test/contract/focus-loss-facts.test.js` (I17).
 
 **IC9 -- Exports.**\

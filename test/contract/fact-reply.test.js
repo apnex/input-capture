@@ -268,7 +268,7 @@ test("IC8: a nested delivery has its own reply, and the outer reply stays live w
 	assert.deepEqual([events.outer.prevented, events.inner.prevented], [1, 0]);
 });
 
-test("I17, IC8: a claim on a wheel fact and on a context-menu fact calls preventDefault once, with the event as receiver; takePointer takes a context menu's pointer and answers false for a wheel, which has none", () => {
+test("I17, IC8: a claim on a wheel fact and on a context-menu fact calls preventDefault once, with the event as receiver; takePointer takes a context menu's pointer and answers false for a wheel event carrying no pointerId, as a browser's carries none", () => {
 	const platform = fakePlatform();
 	const answers = [];
 	const result = openCapture({ ...declarationOver(platform, { listen: ["wheel", "context-menu"] }).declaration, deliver: (fact, reply) => {
@@ -283,4 +283,15 @@ test("I17, IC8: a claim on a wheel fact and on a context-menu fact calls prevent
 	assert.deepEqual(answers, [["wheel", undefined, undefined, false, false], ["context-menu", undefined, undefined, true, true]]);
 	assert.deepEqual([wheel.prevented, menu.prevented], [1, 1]);
 	assert.deepEqual(calls(platform, "surface.setPointerCapture").map((c) => c.args), [[6]], "only the context menu's pointer, once");
+});
+
+test("IC5, IC8: a wheel event that carries a pointerId makes a fact holding it, and takePointer takes that pointer, once", () => {
+	const platform = fakePlatform();
+	const answers = [];
+	assert.equal(openCapture({ ...declarationOver(platform, { listen: ["wheel"] }).declaration, deliver: (fact, reply) => answers.push([fact.type, fact.pointerId, fact.pointerType, reply.takePointer(), reply.takePointer()]) }).ok, true);
+	platform.log.length = 0;
+	platform.surface.fire("wheel", wheelEvent({ pointerId: 9, pointerType: "mouse" }));
+	platform.surface.fire("wheel", wheelEvent());
+	assert.deepEqual(answers, [["wheel", 9, "mouse", true, true], ["wheel", null, null, false, false]]);
+	assert.deepEqual(calls(platform, "surface.setPointerCapture").map((c) => [c.args, c.self === platform.surface.object]), [[[9], true]]);
 });
