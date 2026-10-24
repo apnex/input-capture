@@ -3,7 +3,8 @@
 // process tree, whose storage and network processes outlived a kill of the main process alone and made a
 // release run's removal of the profile fail with ENOTEMPTY, after which the static server, never closed,
 // held the run open. A Chrome killed whole also leaves the directory it made in the scratch directory for
-// its singleton socket, which the teardown removes, found by the link the profile holds to it.
+// its singleton socket, which the teardown removes, found by the link the profile holds to it, whether
+// Chrome names it with a leading dot, as Chrome 136 does, or without, as GitHub's runner's Chrome does.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -77,30 +78,45 @@ test("teardown: a profile that cannot be removed is a warning, never an exceptio
 	}
 });
 
-test("teardown: the directory Chrome made in the scratch directory for its singleton socket, named by the profile's link, is removed; nothing else is", TEST, () => {
+test("teardown: the directory Chrome made in the scratch directory for its singleton socket, named by the profile's link, is removed -- named with a leading dot, as Chrome 136 names it, or without, as a later Chrome does; nothing else is", TEST, () => {
 	const profile = fs.mkdtempSync(path.join(os.tmpdir(), "input-capture-teardown-"));
-	const singleton = path.join(os.tmpdir(), `.com.google.Chrome.${path.basename(profile).slice(-6)}`);
+	const suffix = path.basename(profile).slice(-6);
 	const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), "input-capture-teardown-other-"));
 	const misnamed = fs.mkdtempSync(path.join(os.tmpdir(), "input-capture-teardown-misnamed-"));
+	const made = [];
+	/** A directory in the scratch directory, holding Chrome's singleton files, and the profile's link pointing into it. */
+	const linked = (dir) => {
+		fs.mkdirSync(dir, { recursive: true });
+		made.push(dir);
+		fs.writeFileSync(path.join(dir, "SingletonSocket"), "");
+		fs.writeFileSync(path.join(dir, "SingletonCookie"), "");
+		fs.rmSync(path.join(profile, "SingletonSocket"), { force: true });
+		fs.symlinkSync(path.join(dir, "SingletonSocket"), path.join(profile, "SingletonSocket"));
+		return dir;
+	};
 	try {
 		assert.equal(removeSingleton(profile), null, "a profile with no link removes nothing");
-		fs.mkdirSync(singleton);
-		fs.writeFileSync(path.join(singleton, "SingletonSocket"), "");
-		fs.writeFileSync(path.join(singleton, "SingletonCookie"), "");
-		fs.symlinkSync(path.join(singleton, "SingletonSocket"), path.join(profile, "SingletonSocket"));
-		assert.equal(removeSingleton(profile), singleton);
-		assert.equal(fs.existsSync(singleton), false, "the singleton's directory removed");
-		fs.unlinkSync(path.join(profile, "SingletonSocket"));
-		fs.symlinkSync(path.join(misnamed, "SingletonSocket"), path.join(profile, "SingletonSocket"));
+		for (const name of [`.com.google.Chrome.${suffix}`, `com.google.Chrome.${suffix}`]) {
+			const singleton = linked(path.join(os.tmpdir(), name));
+			assert.equal(removeSingleton(profile), singleton, name);
+			assert.equal(fs.existsSync(singleton), false, `the singleton's directory ${name} removed`);
+		}
+		const wrongNames = [`xcom.google.Chrome.${suffix}`, `..com.google.Chrome.${suffix}`, `com.google.Chrome.${suffix}7`, `.com.google.Chrome.${suffix}7`, `com.google.Chrome.${suffix.slice(1)}`, `com.google.Chrome.${suffix.slice(1)}-`, `com-google-Chrome.${suffix}`, `com.google.Chromium.${suffix}`];
+		for (const name of wrongNames) {
+			const dir = linked(path.join(os.tmpdir(), name));
+			assert.equal(removeSingleton(profile), null, `${name}: not named as Chrome names it, so left`);
+			assert.equal(fs.existsSync(dir), true, `${name} left`);
+		}
+		linked(misnamed);
 		assert.equal(removeSingleton(profile), null, "a directory not named as Chrome names it is left");
 		assert.equal(fs.existsSync(misnamed), true);
-		fs.unlinkSync(path.join(profile, "SingletonSocket"));
-		fs.mkdirSync(path.join(elsewhere, ".com.google.Chrome.abc123"));
-		fs.symlinkSync(path.join(elsewhere, ".com.google.Chrome.abc123", "SingletonSocket"), path.join(profile, "SingletonSocket"));
-		assert.equal(removeSingleton(profile), null, "a directory not directly in the scratch directory is left");
-		assert.equal(fs.existsSync(path.join(elsewhere, ".com.google.Chrome.abc123")), true);
+		for (const name of [".com.google.Chrome.abc123", "com.google.Chrome.abc123"]) {
+			const dir = linked(path.join(elsewhere, name));
+			assert.equal(removeSingleton(profile), null, `${name}: a directory not directly in the scratch directory is left`);
+			assert.equal(fs.existsSync(dir), true);
+		}
 	} finally {
-		for (const dir of [profile, singleton, elsewhere, misnamed]) fs.rmSync(dir, { recursive: true, force: true });
+		for (const dir of [profile, elsewhere, misnamed, ...made]) fs.rmSync(dir, { recursive: true, force: true });
 	}
 });
 

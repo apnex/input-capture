@@ -13,7 +13,8 @@
 // for the group to end is bounded. The profile is removed with retries, and a profile that still cannot be
 // removed is a warning on stderr, never a failure: a leftover scratch directory is no fault of the
 // component. So is the directory Chrome makes beside it in the scratch directory for its singleton socket,
-// which a killed Chrome never removes, found by the link the profile holds to it. The static server is
+// which a killed Chrome never removes, found by the link the profile holds to it and named with or without a
+// leading dot, as one Chrome or another names it. The static server is
 // unreferenced and its connections closed, the socket closed, each in a finally, so no cleanup error leaves
 // a handle holding the process open.
 import { spawn } from "node:child_process";
@@ -117,9 +118,10 @@ export function removeProfile(profile, warn = warnOnStderr) {
 /**
  * Removes the directory Chrome made in the scratch directory for its singleton socket, named by the link
  * `SingletonSocket` in its profile -- only a directory directly in os.tmpdir() whose name is Chrome's
- * `.com.google.Chrome.` and six characters -- since a Chrome killed whole never removes it. A profile with no
- * such link removes nothing; a directory that cannot be removed is a warning, never a failure. Answers the
- * directory removed, or null.
+ * `com.google.Chrome.` and six letters or digits, with or without a leading dot: Chrome 136 names it
+ * `.com.google.Chrome.` and six, a later Chrome on GitHub's runner `com.google.Chrome.` and six -- since a
+ * Chrome killed whole never removes it. A profile with no such link removes nothing; a directory that cannot
+ * be removed is a warning, never a failure. Answers the directory removed, or null.
  */
 export function removeSingleton(profile, warn = warnOnStderr) {
 	let dir;
@@ -128,7 +130,7 @@ export function removeSingleton(profile, warn = warnOnStderr) {
 	} catch {
 		return null;
 	}
-	if (path.dirname(dir) !== path.resolve(os.tmpdir()) || !/^\.com\.google\.Chrome\.[A-Za-z0-9]{6}$/.test(path.basename(dir))) return null;
+	if (path.dirname(dir) !== path.resolve(os.tmpdir()) || !/^\.?com\.google\.Chrome\.[A-Za-z0-9]{6}$/.test(path.basename(dir))) return null;
 	return removeProfile(dir, warn) ? dir : null;
 }
 
