@@ -7,7 +7,9 @@
 // scrollable page unscrolled, and unclaimed scrolls it; a synthesized touchpad pinch arrives as wheel facts
 // with ctrlKey and, claimed, leaves the page's scale 1, while unclaimed it makes it 2, the positive control; a
 // claimed context menu is seen prevented by a later listener; a second tab opened over the protocol makes one
-// blur fact; and no fact's time is less than the one before it.
+// blur fact; and no fact's time is less than the one before it. Last, on a fresh page (i10-body.html), a capture
+// on the body claims a wheel and the page stays unscrolled, where the page's own body listener added with two
+// arguments, which Chrome makes passive, cannot: RD2's { passive: false } seen in a browser.
 //
 // The gate runs it on every push: Chrome is launched as the consumer test launches it, with a profile and
 // a debugging port of its own (chrome-driver.js), and driven over Node.js's global WebSocket. Where a
@@ -343,5 +345,33 @@ if (typeof globalThis.WebSocket !== "function") {
 		await chrome.send("Target.closeTarget", { targetId });
 		await chrome.send("Page.bringToFront");
 		assert.deepEqual(await facts(), []);
+	});
+
+	test("I10: on a fresh page, a capture on the body -- whose wheel listener a browser makes passive unless added with { passive: false } -- claims a wheel and the page stays unscrolled; the page's own two-argument body listener, the control, cannot, and the page scrolls", TEST, async () => {
+		for (const mode of ["capture", "two-args"]) {
+			await chrome.send("Page.navigate", { url: `${server.origin}/test/browser/i10-body.html?mode=${mode}` });
+			for (let i = 0; i < 200 && !(await chrome.evaluate(`globalThis.page?.ready === true && page.mode === ${JSON.stringify(mode)}`)); i++) await sleep(50);
+			assert.equal(await chrome.evaluate("JSON.stringify(page.refused)"), "null", `${mode}: the page opened`);
+			for (let trial = 0; trial < 2; trial++) {
+				await chrome.evaluate("window.scrollTo(0, 0); page.facts.length = 0; page.seen.length = 0");
+				await quiet();
+				// a point within the window's own height, 408 pixels: below it, under the protocol's device-metrics override, Chrome dispatches every wheel on a body listener uncancelable (measured)
+				await mouse("mouseMoved", 300, 300);
+				await sleep(100);
+				await wheel(300, 300, 120);
+				for (let i = 0; i < 60 && (await chrome.evaluate("page.seen.length")) === 0; i++) await sleep(50);
+				const seen = JSON.parse(await chrome.evaluate("JSON.stringify(page.seen)"));
+				let scrollY = 0;
+				for (let i = 0; i < 20 && (mode === "capture" || scrollY === 0); i++, await sleep(50)) scrollY = await chrome.evaluate("window.scrollY");
+				if (mode === "capture") {
+					assert.deepEqual(JSON.parse(await chrome.evaluate("JSON.stringify(page.facts)")), [["wheel", 120, 0]], "the body's capture heard the wheel and claimed it");
+					assert.deepEqual(seen, [{ cancelable: true, defaultPrevented: true }], "added with { passive: false }, the listener's wheel was cancelable, and the claim prevented it");
+					assert.equal(scrollY, 0, "claimed on the body: the page did not scroll");
+				} else {
+					assert.deepEqual(seen, [{ cancelable: false, defaultPrevented: false }], "added with two arguments, the listener was made passive: its wheel was uncancelable");
+					assert.ok(scrollY > 0, "the control: the page scrolled");
+				}
+			}
+		}
 	});
 }
