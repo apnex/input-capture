@@ -1,8 +1,13 @@
-// real-chrome - I10 (CONTRACT.md; INPUT-CAPTURE.md section 4 and section 7): in headless Chrome, with trusted
-// input dispatched through the DevTools protocol's Input domain, on a page whose surface is an SVG element
-// (i10-page.html), what the platform delivers becomes facts as IC4 to IC8 say. The surface is offset on the
-// page and scales a viewBox, so the conversion's answer, read through the element's own screen transform,
-// differs from the screen point at every event, and at is held to the answer, not to screen.
+// real-chrome - I10 (CONTRACT.md; INPUT-CAPTURE.md section 4 and section 7, extended by RELEASES-0.2.md section
+// 3.1): in headless Chrome, with trusted input dispatched through the DevTools protocol's Input domain, on a
+// page whose surface is an SVG element (i10-page.html), what the platform delivers becomes facts as IC4 to IC8
+// say. The surface is offset on the page and scales a viewBox, so the conversion's answer, read through the
+// element's own screen transform, differs from the screen point at every event, and at is held to the answer,
+// not to screen. The capture lists the wheel, the context menu and focus loss: a claimed wheel leaves the
+// scrollable page unscrolled, and unclaimed scrolls it; a synthesized touchpad pinch arrives as wheel facts
+// with ctrlKey and, claimed, leaves the page's scale 1, while unclaimed it makes it 2, the positive control; a
+// claimed context menu is seen prevented by a later listener; a second tab opened over the protocol makes one
+// blur fact; and no fact's time is less than the one before it.
 //
 // The gate runs it on every push: Chrome is launched as the consumer test launches it, with a profile and
 // a debugging port of its own (chrome-driver.js), and driven over Node.js's global WebSocket. Where a
@@ -120,7 +125,7 @@ if (typeof globalThis.WebSocket !== "function") {
 		await facts();
 		await mouse("mousePressed", 200, 200, "right", 2, 1);
 		await mouse("mouseReleased", 200, 200, "right", 0, 1);
-		const right = await facts();
+		const right = only(await facts(), "down", "up");
 		assert.deepEqual(right.map((f) => [f.type, f.button, f.buttons]), [["down", 2, 2], ["up", 2, 0]]);
 		await mouse("mouseMoved", 220, 210);
 		const move = await facts();
@@ -197,7 +202,130 @@ if (typeof globalThis.WebSocket !== "function") {
 		assert.deepEqual(JSON.parse(await chrome.evaluate("JSON.stringify(page.later)")), [{ key: "a", defaultPrevented: false }, { key: "a", defaultPrevented: false }, { key: "q", defaultPrevented: true }]);
 	});
 
-	test("I10: nothing after close -- close answers undefined, and no press, move, release or key delivers a fact", TEST, async () => {
+	/** The page's scroll offset and its visual viewport's scale. */
+	const view = async () => JSON.parse(await chrome.evaluate("JSON.stringify({ scrollY: window.scrollY, scale: visualViewport.scale })"));
+	const wheel = (x, y, deltaY, extra = {}) => chrome.send("Input.dispatchMouseEvent", { type: "mouseWheel", x, y, deltaX: 0, deltaY, ...extra });
+	/**
+	 * Waits a second with no wheel, so a scroll sequence an earlier unclaimed wheel began has ended: Chrome latches
+	 * a wheel to the sequence before it, and dispatches it uncancelable when that sequence's first wheel was not
+	 * claimed (measured, 390 milliseconds after), so a claim of it could prevent nothing.
+	 */
+	const quiet = () => sleep(1000);
+	/** Scrolls the page back to its top and its scale back to 1, and waits for both. */
+	const restore = async () => {
+		await chrome.evaluate("window.scrollTo(0, 0)");
+		await chrome.send("Emulation.setPageScaleFactor", { pageScaleFactor: 1 });
+		for (let i = 0; i < 40; i++) {
+			const now = await view();
+			if (now.scrollY === 0 && now.scale === 1) return;
+			await sleep(50);
+		}
+		assert.deepEqual(await view(), { scrollY: 0, scale: 1 }, "the page restored");
+	};
+
+	test("I10: a claimed wheel over the surface of a scrollable page leaves it unscrolled; its fact holds the deltas as delivered, in pixels; unclaimed, the page scrolls", TEST, async () => {
+		await restore();
+		await quiet();
+		await mouse("mouseMoved", 200, 200);
+		await policy({ take: false, claim: [], claimWheel: true, claimMenu: false });
+		await facts();
+		await wheel(200, 200, 120);
+		await wheel(200, 200, -40, { deltaX: 15 });
+		const claimed = await facts();
+		assert.deepEqual(claimed.map((f) => [f.type, ...f.deltas, f.deltaMode, f.modifiers[1], f.claimed]), [["wheel", 0, 120, 0, 0, false, true], ["wheel", 15, -40, 0, 0, false, true]]);
+		assert.ok(claimed.every((f) => f.keys === 21 && f.frozen && f.pointerType === null && f.pointerId === null && f.hit === "surface"), "a wheel is a MouseEvent: no pointerId or pointerType");
+		assert.ok(converted(claimed));
+		assert.equal((await view()).scrollY, 0, "claimed: the page did not scroll");
+		await policy({ take: false, claim: [], claimWheel: false, claimMenu: false });
+		await wheel(200, 200, 120);
+		// the page scrolling moves the surface from under the still pointer, which may fire its out and leave
+		const unclaimed = only(await facts(), "wheel");
+		assert.deepEqual(unclaimed.map((f) => [f.type, f.deltas[1], f.claimed ?? false]), [["wheel", 120, false]]);
+		let scrolled = 0;
+		for (let i = 0; i < 40 && scrolled === 0; i++, await sleep(50)) scrolled = (await view()).scrollY;
+		assert.ok(scrolled > 0, "unclaimed, the positive control: the page scrolled");
+		await restore();
+	});
+
+	test("I10: a touchpad pinch synthesized over the protocol arrives as wheel facts with ctrlKey true; claimed, visualViewport.scale stays 1; unclaimed, the positive control, it becomes 2", TEST, async () => {
+		await restore();
+		await quiet();
+		await policy({ take: false, claim: [], claimWheel: true, claimMenu: false });
+		await mouse("mouseMoved", 240, 170);
+		await facts();
+		await chrome.send("Input.synthesizePinchGesture", { x: 240, y: 170, scaleFactor: 2, relativeSpeed: 800, gestureSourceType: "mouse" });
+		const pinch = await facts();
+		assert.ok(pinch.length >= 5, `${pinch.length} wheel facts`);
+		assert.ok(pinch.every((f) => f.type === "wheel" && f.modifiers[1] === true && f.deltaMode === 0 && f.claimed), "every fact a claimed wheel with ctrlKey true, in pixels");
+		assert.ok(pinch.some((f) => !Number.isInteger(f.deltas[1])), "fractional deltas, as a pinch's are");
+		assert.ok(pinch.every((f) => f.deltas[1] < 0), "spreading apart is a wheel turned up");
+		assert.equal((await view()).scale, 1, "claimed: the page did not zoom");
+		await policy({ take: false, claim: [], claimWheel: false, claimMenu: false });
+		await chrome.send("Input.synthesizePinchGesture", { x: 240, y: 170, scaleFactor: 2, relativeSpeed: 800, gestureSourceType: "mouse" });
+		const unclaimed = await facts();
+		assert.ok(unclaimed.length >= 5 && unclaimed.every((f) => f.type === "wheel" && f.modifiers[1] === true && !f.claimed));
+		let scale = 1;
+		for (let i = 0; i < 40 && Math.abs(scale - 2) >= 0.01; i++, await sleep(50)) scale = (await view()).scale;
+		assert.ok(Math.abs(scale - 2) < 0.01, `unclaimed, the positive control: the page zoomed to 2 (${scale})`);
+		await restore();
+	});
+
+	test("I10: a right press's context-menu fact, a pointer fact between the down and the up, claimed, is seen defaultPrevented by a later listener; unclaimed, not", TEST, async () => {
+		await restore();
+		await mouse("mouseMoved", 200, 200);
+		await policy({ take: false, claim: [], claimWheel: false, claimMenu: true });
+		await facts();
+		await chrome.evaluate("page.laterMenu.length = 0");
+		await mouse("mousePressed", 200, 200, "right", 2, 1);
+		await mouse("mouseReleased", 200, 200, "right", 0, 1);
+		const got = await facts();
+		assert.deepEqual(got.map((f) => [f.type, f.button, f.buttons]), [["down", 2, 2], ["context-menu", 2, 2], ["up", 2, 0]], "on Linux, the menu's event after the press and before the release");
+		const menu = got[1];
+		assert.deepEqual([menu.pointerType, menu.hit, menu.claimed, menu.keys, menu.deltas, menu.deltaMode, menu.key], ["mouse", "surface", true, 21, [null, null, null], null, null]);
+		assert.ok(Number.isSafeInteger(menu.pointerId) && menu.pointerId === got[0].pointerId, "Chrome delivers it as a PointerEvent, its pointer the press's");
+		assert.ok(converted(got));
+		await mouse("mousePressed", 200, 200, "right", 2, 1);
+		await mouse("mouseReleased", 200, 200, "right", 0, 1);
+		await policy({ take: false, claim: [], claimWheel: false, claimMenu: false });
+		await mouse("mousePressed", 210, 200, "right", 2, 1);
+		await mouse("mouseReleased", 210, 200, "right", 0, 1);
+		await facts();
+		assert.deepEqual(JSON.parse(await chrome.evaluate("JSON.stringify(page.laterMenu.splice(0))")), [{ defaultPrevented: true, kind: "PointerEvent" }, { defaultPrevented: true, kind: "PointerEvent" }, { defaultPrevented: false, kind: "PointerEvent" }]);
+	});
+
+	test("I10: a second tab opened over the protocol makes one blur fact on the window key source, its time the event's, every other property null and every modifier false", TEST, async () => {
+		await facts();
+		// a page focused by input alone keeps document.hasFocus() through a second tab, with no blur (measured): brought to the front, it holds the window's focus
+		await chrome.send("Page.bringToFront");
+		for (let i = 0; i < 40 && !(await chrome.evaluate("document.hasFocus()")); i++) await sleep(50);
+		assert.equal(await chrome.evaluate("document.hasFocus()"), true, "the page holds the focus");
+		await facts();
+		const { targetId } = await chrome.send("Target.createTarget", { url: "about:blank" });
+		let got;
+		try {
+			got = await facts();
+		} finally {
+			await chrome.send("Target.closeTarget", { targetId });
+			await chrome.send("Page.bringToFront");
+		}
+		assert.equal(got.length, 1, JSON.stringify(got));
+		const [blur] = got;
+		assert.deepEqual({ ...blur, time: null }, { type: "blur", at: null, screen: null, hit: null, focus: null, button: null, buttons: null, pointerId: null, pointerType: null, key: null, code: null, repeat: null, modifiers: [false, false, false, false], deltas: [null, null, null], deltaMode: null, time: null, keys: 21, frozen: true });
+		assert.ok(typeof blur.time === "number" && Number.isFinite(blur.time) && blur.time > 0, "the blur's own timeStamp");
+		for (let i = 0; i < 40 && !(await chrome.evaluate("document.hasFocus()")); i++) await sleep(50);
+		assert.equal(await chrome.evaluate("document.hasFocus()"), true, "back at the front, the page holds the focus again");
+		assert.deepEqual(await facts(), [], "regaining focus makes no fact");
+	});
+
+	test("I10: every fact's time is a finite number, and none is less than the one before it, across the whole run", TEST, async () => {
+		const times = JSON.parse(await chrome.evaluate("JSON.stringify(page.times)"));
+		assert.ok(times.length > 60, `${times.length} facts`);
+		assert.ok(times.every((t) => typeof t === "number" && Number.isFinite(t) && t > 0), "each a finite, positive number");
+		const back = times.findIndex((t, i) => i > 0 && t < times[i - 1]);
+		assert.equal(back, -1, `time decreased at fact ${back}: ${times[back - 1]} then ${times[back]}`);
+	});
+
+	test("I10: nothing after close -- close answers undefined, and no press, move, release, key, wheel, menu or focus loss delivers a fact", TEST, async () => {
 		assert.equal(await chrome.evaluate("String(page.capture.close())"), "undefined");
 		assert.equal(await chrome.evaluate("String(page.capture.close())"), "undefined", "a second close does nothing");
 		await mouse("mouseMoved", 100, 100);
@@ -207,6 +335,13 @@ if (typeof globalThis.WebSocket !== "function") {
 		await mouse("mouseMoved", 600, 500);
 		await key("keyDown", "a", "KeyA", { text: "a", windowsVirtualKeyCode: 65 });
 		await key("keyUp", "a", "KeyA", { windowsVirtualKeyCode: 65 });
+		await wheel(200, 200, 120);
+		await mouse("mousePressed", 200, 200, "right", 2, 1);
+		await mouse("mouseReleased", 200, 200, "right", 0, 1);
+		await chrome.send("Page.bringToFront");
+		const { targetId } = await chrome.send("Target.createTarget", { url: "about:blank" });
+		await chrome.send("Target.closeTarget", { targetId });
+		await chrome.send("Page.bringToFront");
 		assert.deepEqual(await facts(), []);
 	});
 }
