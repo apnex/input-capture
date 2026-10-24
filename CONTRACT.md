@@ -101,7 +101,7 @@ Capture reaches the platform only through the values the application hands it, a
 
 It reads no other member, never reads a target's members or an event's prototype, and names no global: no `window`, no `document`, no constructor of the platform's.\
 So it cannot reach beyond the surface and the key source it is given, and the same code runs over a browser's objects and over plain objects of their shape.\
-So also a `visibilitychange`, which is fired at the document, is not listened for: a key source's `blur` precedes it when the page's tab is left (measured, with the window and with a focused element as key source); minimising a window or locking the screen is not measured.\
+So also a `visibilitychange`, which is fired at the document, is not listened for: a key source's `blur` precedes it when the page's tab is left, measured in headless Chrome for a page holding the window's focus, with the window and with a focused element as key source; a page focused only by trusted input heard no `blur` when another tab opened, and minimising a window or locking the screen is not measured.\
 Tested by: `test/contract/pointer-facts.test.js` (I3, the recording tests over the surface, the key source, the events and their targets, one of them with every family listed).
 
 **IC2 -- How values are read.**\
