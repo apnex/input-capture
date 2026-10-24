@@ -2,3 +2,4 @@ node_modules/
 dist/
 .mission-kit/
 *.tgz
+!test/fixtures/apnex-input-capture-0.1.0.tgz
