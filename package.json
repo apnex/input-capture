@@ -1,6 +1,6 @@
 {
   "name": "@apnex/input-capture",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Turn each input event a platform delivers on one surface into one uniform fact, in the application's coordinates, and carry the application's answer for that fact back to the platform.",
   "license": "MIT",
   "author": "apnex",

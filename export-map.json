@@ -3,7 +3,7 @@
   "paths": {
     ".": {
       "exports": {
-        "openCapture": { "part": "input-capture", "serves": ["declared-capture", "pointer-facts", "key-facts", "fact-reply"] }
+        "openCapture": { "part": "input-capture", "serves": ["declared-capture", "pointer-facts", "key-facts", "focus-loss-facts", "fact-reply"] }
       }
     }
   },

@@ -32,7 +32,7 @@ for (const [p, entry] of Object.entries(map.paths)) {
 	});
 }
 
-test("IC9: the package exports openCapture, and nothing else; it has no subpath", async () => {
+test("IC9: the package exports openCapture, and nothing else -- the 0.2.0 fact types being types alone; it has no subpath", async () => {
 	assert.deepEqual(Object.keys(await import("@apnex/input-capture")), ["openCapture"]);
 	assert.deepEqual(pkg.exports, { ".": { types: "./dist/index.d.ts", default: "./dist/index.js" } });
 	await assert.rejects(import("@apnex/input-capture/dist/reply.js"), "no file is reachable by a subpath");
@@ -45,13 +45,13 @@ test("IC9: no built file reads a clock or randomness, holds a timer, or reaches 
 	for (const file of files) assert.deepEqual(findClockAndChance(fs.readFileSync(path.join(dist, file), "utf8"), file), [], file);
 });
 
-test("the export map is section 7's: one path, openCapture serving all four capabilities, { part: 'input-capture', serves }, nothing deferred", () => {
+test("the export map: one path, openCapture serving all five capabilities -- focus-loss-facts the row 0.2.0 adds, the wheel and the context menu widening pointer-facts -- { part: 'input-capture', serves }, nothing deferred", () => {
 	assert.deepEqual(map, {
 		package: "@apnex/input-capture",
 		paths: {
 			".": {
 				exports: {
-					openCapture: { part: "input-capture", serves: ["declared-capture", "pointer-facts", "key-facts", "fact-reply"] },
+					openCapture: { part: "input-capture", serves: ["declared-capture", "pointer-facts", "key-facts", "focus-loss-facts", "fact-reply"] },
 				},
 			},
 		},
@@ -61,7 +61,7 @@ test("the export map is section 7's: one path, openCapture serving all four capa
 
 test("every contract row is served by an export or deferred with a ruling", () => {
 	const rows = contractRows(fs.readFileSync(path.join(root, "CONTRACT.md"), "utf8"));
-	assert.equal(rows.length, 4);
+	assert.equal(rows.length, 5);
 	const served = new Set(Object.values(map.paths).flatMap((e) => Object.values(e.exports ?? {})).flatMap((x) => x.serves));
 	for (const row of rows) assert.ok(served.has(row) || map.deferred[row], `${row} is neither served nor deferred`);
 	for (const [row, ruling] of Object.entries(map.deferred)) assert.match(ruling, /^D\d+$/, `${row} is deferred without a ruling`);
@@ -73,7 +73,7 @@ test("the package declares no dependency, and pins TypeScript", () => {
 	assert.equal(pkg.type, "module");
 	assert.equal(pkg.engines.node, ">=22");
 	assert.equal(pkg.name, "@apnex/input-capture");
-	assert.equal(pkg.version, "0.1.0");
+	assert.equal(pkg.version, "0.2.0");
 	assert.equal(pkg.repository.url, "git+https://github.com/apnex/input-capture.git");
 	assert.deepEqual(pkg.files.sort(), ["CONTRACT.md", "LICENSE", "README.md", "VISION.md", "dist"]);
 });
@@ -94,6 +94,7 @@ test("the export-map check passes here, and fails on a map that names an export 
 		assert.ok(problems.some((p) => p.startsWith(". exports") && p.includes("extraThing")), problems.join("\n"));
 		assert.ok(problems.some((p) => p.includes("no-such-row")), problems.join("\n"));
 		assert.ok(problems.some((p) => p === "key-facts is neither served nor deferred"), problems.join("\n"));
+		assert.ok(problems.some((p) => p === "focus-loss-facts is neither served nor deferred"), problems.join("\n"));
 		assert.ok(problems.some((p) => p === "fact-reply is neither served nor deferred"), problems.join("\n"));
 	} finally {
 		fs.rmSync(copy, { recursive: true, force: true });
