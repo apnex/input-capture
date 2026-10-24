@@ -8,7 +8,8 @@
 // - any declaration carrying `declare` -- `var`, `let`, `const`, `function`, `class`, `enum`, `namespace`,
 //   `module`, `global`, `type`, `interface`, or a class field;
 // - a triple-slash directive -- a reference to a path, to types or to a lib, `no-default-lib`, or any
-//   other comment opening `///` and `<`;
+//   other comment opening `///` and `<`, wherever it stands, every comment found from the parsed tree, so
+//   one after a template literal with a substitution is found too;
 // - a file that is no ES module, since every top-level declaration of a script is a global;
 // - a file TypeScript cannot parse without a diagnostic, rather than guessing at it.
 // It checks that tsconfig.json's `lib` is `["ES2022"]` and its `types` `[]`, that it extends no other
@@ -65,10 +66,18 @@ export function findSourceProblems(source, fileName = "source.ts") {
 	for (const ref of file.typeReferenceDirectives) found.push({ line: lineAt(ref.pos), finding: `holds a triple-slash reference to the types "${ref.fileName}"` });
 	for (const ref of file.libReferenceDirectives) found.push({ line: lineAt(ref.pos), finding: `holds a triple-slash reference to the lib "${ref.fileName}"` });
 	if (file.hasNoDefaultLib) found.push({ line: 1, finding: "holds a triple-slash no-default-lib directive" });
-	const scanner = ts.createScanner(ts.ScriptTarget.Latest, false, ts.LanguageVariant.Standard, source);
-	for (let token = scanner.scan(); token !== ts.SyntaxKind.EndOfFileToken; token = scanner.scan()) {
-		if (token === ts.SyntaxKind.SingleLineCommentTrivia && /^\/\/\/\s*</.test(scanner.getTokenText())) {
-			const line = lineAt(scanner.getTokenStart());
+	// every comment is found from the parsed tree -- the leading and trailing comment ranges of each token, the
+	// end-of-file token's among them -- since a bare scanner reads a template literal's text after its first
+	// substitution as code, and would miss a comment anywhere after it
+	const comments = new Map();
+	const collect = (node) => {
+		for (const range of [...(ts.getLeadingCommentRanges(source, node.pos) ?? []), ...(ts.getTrailingCommentRanges(source, node.end) ?? [])]) comments.set(range.pos, range);
+		for (const child of node.getChildren(file)) collect(child);
+	};
+	collect(file);
+	for (const range of comments.values()) {
+		if (range.kind === ts.SyntaxKind.SingleLineCommentTrivia && /^\/\/\/\s*</.test(source.slice(range.pos, range.end))) {
+			const line = lineAt(range.pos);
 			if (!found.some((f) => f.line === line && f.finding.startsWith("holds a triple-slash"))) found.push({ line, finding: "holds a comment of a triple-slash directive's form" });
 		}
 	}

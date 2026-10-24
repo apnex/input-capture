@@ -2,7 +2,8 @@
 // writer outlives its leader and goes on writing to the profile (fake-browser.mjs) stands in for Chrome's
 // process tree, whose storage and network processes outlived a kill of the main process alone and made a
 // release run's removal of the profile fail with ENOTEMPTY, after which the static server, never closed,
-// held the run open.
+// held the run open. A Chrome killed whole also leaves the directory it made in the scratch directory for
+// its singleton socket, which the teardown removes, found by the link the profile holds to it.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -11,7 +12,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { closeServer, launchGroup, removeProfile, serveRepository, sleep } from "./chrome-driver.js";
+import { closeServer, launchChrome, launchGroup, removeProfile, removeSingleton, serveRepository, sleep } from "./chrome-driver.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..", "..");
@@ -74,6 +75,54 @@ test("teardown: a profile that cannot be removed is a warning, never an exceptio
 		fs.chmodSync(locked, 0o700);
 		fs.rmSync(profile, { recursive: true, force: true });
 	}
+});
+
+test("teardown: the directory Chrome made in the scratch directory for its singleton socket, named by the profile's link, is removed; nothing else is", TEST, () => {
+	const profile = fs.mkdtempSync(path.join(os.tmpdir(), "input-capture-teardown-"));
+	const singleton = path.join(os.tmpdir(), `.com.google.Chrome.${path.basename(profile).slice(-6)}`);
+	const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), "input-capture-teardown-other-"));
+	const misnamed = fs.mkdtempSync(path.join(os.tmpdir(), "input-capture-teardown-misnamed-"));
+	try {
+		assert.equal(removeSingleton(profile), null, "a profile with no link removes nothing");
+		fs.mkdirSync(singleton);
+		fs.writeFileSync(path.join(singleton, "SingletonSocket"), "");
+		fs.writeFileSync(path.join(singleton, "SingletonCookie"), "");
+		fs.symlinkSync(path.join(singleton, "SingletonSocket"), path.join(profile, "SingletonSocket"));
+		assert.equal(removeSingleton(profile), singleton);
+		assert.equal(fs.existsSync(singleton), false, "the singleton's directory removed");
+		fs.unlinkSync(path.join(profile, "SingletonSocket"));
+		fs.symlinkSync(path.join(misnamed, "SingletonSocket"), path.join(profile, "SingletonSocket"));
+		assert.equal(removeSingleton(profile), null, "a directory not named as Chrome names it is left");
+		assert.equal(fs.existsSync(misnamed), true);
+		fs.unlinkSync(path.join(profile, "SingletonSocket"));
+		fs.mkdirSync(path.join(elsewhere, ".com.google.Chrome.abc123"));
+		fs.symlinkSync(path.join(elsewhere, ".com.google.Chrome.abc123", "SingletonSocket"), path.join(profile, "SingletonSocket"));
+		assert.equal(removeSingleton(profile), null, "a directory not directly in the scratch directory is left");
+		assert.equal(fs.existsSync(path.join(elsewhere, ".com.google.Chrome.abc123")), true);
+	} finally {
+		for (const dir of [profile, singleton, elsewhere, misnamed]) fs.rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("teardown: a real Chrome launched and closed leaves neither its profile nor its singleton socket's directory in the scratch directory", TEST, async (t) => {
+	if (typeof globalThis.WebSocket !== "function") {
+		t.skip("this Node.js keeps its WebSocket behind a flag; real-chrome.test.js runs Chrome's teardown with the flag");
+		return;
+	}
+	const before = new Set(fs.readdirSync(os.tmpdir()));
+	const chrome = await launchChrome();
+	const profile = chrome.profile;
+	let singleton;
+	try {
+		singleton = path.dirname(fs.readlinkSync(path.join(profile, "SingletonSocket")));
+	} finally {
+		await chrome.close();
+	}
+	assert.equal(path.dirname(singleton), path.resolve(os.tmpdir()), "Chrome made its singleton socket's directory in the scratch directory");
+	assert.equal(fs.existsSync(profile), false, "the profile removed");
+	assert.equal(fs.existsSync(singleton), false, `the singleton socket's directory ${singleton} removed`);
+	const left = fs.readdirSync(os.tmpdir()).filter((name) => !before.has(name) && (name.startsWith("input-capture-i10-") || name === path.basename(singleton)));
+	assert.deepEqual(left, []);
 });
 
 test("teardown: closing the static server ends its kept-alive connections at once, and never throws, even twice", TEST, async () => {
