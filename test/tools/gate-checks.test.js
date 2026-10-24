@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 
 import { candidateWords, findVocabulary, readVocabulary, splitWords } from "../../tools/check-vocabulary.mjs";
 import { findClockAndChance } from "../../tools/check-clock-and-chance.mjs";
-import { findRuntimeUses } from "../../tools/check-runtime.mjs";
+import { ALLOWED_GLOBALS, findRuntimeUses, freeGlobalReferences, parseModule, PLATFORM_INTERFACES, PLATFORM_SLICE, platformMemberNames } from "../../tools/check-runtime.mjs";
 import { findConfigProblems, findSourceProblems, sourceProblems } from "../../tools/check-source.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -28,7 +28,9 @@ test("I12: the vocabulary check splits identifiers at case changes, underscores,
 	assert.deepEqual(candidateWords("draw_V2"), ["draw_v2", "drawv2", "draw", "v", "2"]);
 	const lists = readVocabulary();
 	assert.deepEqual(findVocabulary("// the anchor of a thing", lists).map((f) => f.word), ["anchor"]);
-	assert.deepEqual(findVocabulary('const s = "Keyboard";', lists).map((f) => [f.word, f.consumer]), [["keyboard", "gesture-tester"]]);
+	assert.deepEqual(findVocabulary('const s = "Keyboard";', lists).map((f) => [f.word, f.consumer]), [["keyboard", "input-tester"]]);
+	assert.deepEqual(Object.keys(lists), ["draw", "input-tester"], "the tester's list is named input-tester");
+	assert.deepEqual(lists["input-tester"], ["keyboard", "keycap"], "its words kept");
 	assert.deepEqual(findVocabulary("const route = group(key, mouse, bend, draw, nodal, linkage, keys, groups);", lists), [], "ordinary words, and words that merely contain a listed one, pass");
 });
 
@@ -121,7 +123,7 @@ test("I12: the runtime check passes over dist, and fails on a bare or node: impo
 });
 
 test("I12: the runtime check reads names in code only, never in comments or strings, nor as members", () => {
-	const clean = '// globalThis, process and require( in a comment\nimport { a } from "./a.js";\nexport * from "../b.js";\nconst s = "window document self";\nconst q = \'process\';\nconst t = `import("x") ${a.process}`;\nconst o = { x: options.self };\nconst d = a / b / c;\nconst r = [/"/g, /\\//];\n/* Buffer */\n';
+	const clean = '// globalThis, process and require( in a comment\nimport { a } from "./a.js";\nconst options = {}, b = 1, c = 2;\nexport * from "../b.js";\nconst s = "window document self";\nconst q = \'process\';\nconst t = `import("x") ${a.process}`;\nconst o = { x: options.global };\nconst d = a / b / c;\nconst r = [/"/g, /\\//];\n/* Buffer */\n';
 	assert.deepEqual(findRuntimeUses(clean), []);
 	assert.deepEqual(findRuntimeUses("const t = `a ${globalThis.x} b`;\n").map((f) => f.finding), ["names globalThis"]);
 	assert.deepEqual(findRuntimeUses("const r = /'/; const p = process.env;\n").map((f) => f.finding), ["names process"], "a quote inside a regular expression begins no string");
@@ -130,12 +132,138 @@ test("I12: the runtime check reads names in code only, never in comments or stri
 	assert.deepEqual(findRuntimeUses("if (Math.PI) /'/.test(''); globalThis.x = 1; //'\n").map((f) => f.finding), ["names globalThis"], "a regular expression after ) is no division");
 	assert.deepEqual(findRuntimeUses("{} /'/.test(''); process.exit(); //'\n").map((f) => f.finding), ["names process"], "a regular expression after a block's } is no division");
 	assert.deepEqual(findRuntimeUses("const o = { self: 1 };\n").map((f) => f.finding), ["names self"], "an object-literal key is counted");
-	assert.deepEqual(findRuntimeUses("const m = import.meta.url; const n = a?.process;\n"), [], "import.meta is no dynamic import, and an optional member is a member");
-	assert.deepEqual(findRuntimeUses('const a = x.eval; const b = y.Function; const s = "eval(Function)"; const c = o.constructor; const d = o.constructor === Object; // eval\n'), [], "eval and Function as members, in strings and comments, and a constructor read but not called, pass");
+	assert.deepEqual(findRuntimeUses("const a = {}; const m = import.meta.url; const n = a?.process;\n"), [], "import.meta is no dynamic import, and an optional member is a member");
+	assert.deepEqual(findRuntimeUses('const x = {}, y = {}, o = {}; const a = x.eval; const b = y.Function; const s = "eval(Function)"; const c = o.constructor; const d = o.constructor === Object; // eval\n'), [], "eval and Function as members, in strings and comments, and a constructor read but not called, pass");
 	assert.deepEqual(findRuntimeUses('const g = eval("this");\n').map((f) => f.finding), ["names eval"]);
 	assert.deepEqual(findRuntimeUses('const g = new Function("return this")();\n').map((f) => f.finding), ["names Function"]);
-	assert.deepEqual(findRuntimeUses('const g = f.constructor("return this")();\n').map((f) => f.finding), ["calls through a property named constructor, which reaches Function"]);
+	assert.deepEqual(findRuntimeUses('const f = () => 0; const g = f.constructor("return this")();\n').map((f) => f.finding), ["calls through a property named constructor, which reaches Function"]);
 	assert.throws(() => findRuntimeUses('const s = "open;\n'), /could not parse/);
+});
+
+test("I12, IC1: the runtime check's platform members are lib.dom.d.ts's for the ten interfaces and what they extend, and the slice is exactly IC1's eighteen, the five reads 0.2.0 adds, the conversion's x and y and the build's own focus, name and length", () => {
+	assert.deepEqual(PLATFORM_INTERFACES, ["EventTarget", "Element", "Window", "Event", "UIEvent", "MouseEvent", "PointerEvent", "WheelEvent", "KeyboardEvent", "FocusEvent"]);
+	const members = platformMemberNames();
+	assert.ok(members.size > 300, `${members.size} platform members`);
+	for (const name of ["composedPath", "tagName", "getModifierState", "relatedTarget", "currentTarget", "defaultPrevented", "type", "detail", "view", "location", "isComposing", "width", "pressure", "getCoalescedEvents", "parentNode", "childNodes", "getAttribute", "closest", "blur", "screen", "event", "close", "open", "status", "dispatchEvent", "hasPointerCapture", "releasePointerCapture", "DOM_DELTA_LINE"]) {
+		assert.ok(members.has(name), `${name} is a platform member`);
+	}
+	for (const name of Object.values(PLATFORM_SLICE).flat()) assert.ok(members.has(name), `${name}, of the slice, is a platform member the check allows`);
+	assert.deepEqual(PLATFORM_SLICE, {
+		surface: ["addEventListener", "removeEventListener", "setPointerCapture"],
+		pointerEvent: ["clientX", "clientY", "button", "buttons", "pointerId", "pointerType", "shiftKey", "ctrlKey", "altKey", "metaKey", "target", "preventDefault"],
+		keyEvent: ["key", "code", "repeat"],
+		added: ["deltaX", "deltaY", "deltaZ", "deltaMode", "timeStamp"],
+		conversion: ["x", "y"],
+		own: ["focus", "name", "length"],
+	});
+	assert.equal([...PLATFORM_SLICE.surface, ...PLATFORM_SLICE.pointerEvent, ...PLATFORM_SLICE.keyEvent].length, 18, "IC1's eighteen");
+	assert.equal(new Set(Object.values(PLATFORM_SLICE).flat()).size, 28, "no name twice");
+});
+
+test("I12, IC1: the walk run on the build with the build's own names taken out finds focus, name and length and nothing else, so each is one the build names", () => {
+	const narrowed = new Set(Object.entries(PLATFORM_SLICE).filter(([group]) => group !== "own").flatMap(([, names]) => names));
+	const found = new Set();
+	for (const file of fs.readdirSync(path.join(root, "dist")).filter((f) => f.endsWith(".js"))) {
+		for (const { finding } of findRuntimeUses(fs.readFileSync(path.join(root, "dist", file), "utf8"), file, narrowed)) found.add(finding);
+	}
+	assert.deepEqual([...found].sort(), ["focus", "length", "name"].map((name) => `names ${name}, a platform member outside IC1's slice`));
+});
+
+test("I12, IC1: the runtime check fails on an event's composedPath and a target's tagName -- by dot, brackets, destructuring, in and Reflect -- and passes a built file naming the slice", () => {
+	const finding = (name) => `names ${name}, a platform member outside IC1's slice`;
+	const planted = [
+		["export const a = (event) => event.composedPath();\n", "composedPath"],
+		["export const b = (target) => target.tagName;\n", "tagName"],
+		["export const c = (event) => event[\"composedPath\"]();\n", "composedPath"],
+		["export const d = (target) => target?.tagName;\n", "tagName"],
+		["export const e = ({ composedPath }) => composedPath;\n", "composedPath"],
+		["export const f = (target) => { const { tagName: tag } = target; return tag; };\n", "tagName"],
+		["export const g = (event) => \"composedPath\" in event;\n", "composedPath"],
+		["export const h = (target) => Reflect.get(target, \"tagName\");\n", "tagName"],
+		["export const i = (event) => event[`composedPath`]();\n", "composedPath"],
+		["export const j = (target) => { let tag; ({ tagName: tag } = target); return tag; };\n", "tagName"],
+		["export const k = (target) => Object.getOwnPropertyDescriptor(target, \"tagName\");\n", "tagName"],
+		["export const l = (event) => Object.prototype.hasOwnProperty.call(event, \"composedPath\");\n", "composedPath"],
+		["export const m = (event) => event.getModifierState(\"CapsLock\");\n", "getModifierState"],
+		["export const n = (event) => event.relatedTarget;\n", "relatedTarget"],
+		["export const o = (event) => event.type;\n", "type"],
+		["export const p = (event) => event.defaultPrevented;\n", "defaultPrevented"],
+	];
+	for (const [text, name] of planted) assert.deepEqual(findRuntimeUses(text).map((f) => f.finding), [finding(name)], text);
+	const clean = [
+		"export const a = (event) => [event.clientX, event.clientY, event.button, event.buttons, event.pointerId, event.pointerType, event.shiftKey, event.ctrlKey, event.altKey, event.metaKey, event.target, event.preventDefault];\n",
+		"export const b = (event) => [event.key, event.code, event.repeat, event.timeStamp, event.deltaX, event.deltaY, event.deltaZ, event.deltaMode];\n",
+		"export const c = (surface, listener) => { surface.addEventListener(\"wheel\", listener, { passive: false }); surface.removeEventListener(\"wheel\", listener); surface.setPointerCapture(1); };\n",
+		"export const d = (answer, judged, entry, list) => [answer.x, answer.y, judged.focus, entry.name, list.length];\n",
+		"// composedPath, tagName and getModifierState in a comment\nexport const e = \"event.composedPath(target.tagName)\";\n",
+		"export const f = (map, key) => map.get(key) ?? map.has(key);\n",
+		"export const g = (event) => Reflect.get(event, \"timeStamp\") ?? Object.hasOwn(event, \"deltaMode\");\n",
+	];
+	for (const text of clean) assert.deepEqual(findRuntimeUses(text), [], text);
+	// each plant a file of its own in one copy, run through the tool once: each must be reported
+	const dir = scratch(Object.fromEntries(planted.map(([text], i) => [`member-${String(i).padStart(2, "0")}.js`, text])));
+	try {
+		const r = run("check-runtime.mjs", dir);
+		assert.equal(r.status, 1);
+		planted.forEach(([text], i) => assert.match(r.stdout, new RegExp(`member-${String(i).padStart(2, "0")}\\.js:\\d+  names \\w+, a platform member outside IC1's slice`), text));
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("I12, IC1: composedPath and tagName planted in a copy of the built files are each found", () => {
+	for (const [plant, name] of [["export const planted = (event) => event.composedPath()[0];\n", "composedPath"], ["export const planted = (target) => target.tagName;\n", "tagName"]]) {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "input-capture-dist-"));
+		try {
+			fs.cpSync(path.join(root, "dist"), dir, { recursive: true });
+			const file = path.join(dir, "event-reading.js");
+			fs.writeFileSync(file, `${fs.readFileSync(file, "utf8")}\n${plant}`);
+			const r = run("check-runtime.mjs", dir);
+			assert.equal(r.status, 1, name);
+			assert.match(r.stdout, new RegExp(`event-reading\\.js:\\d+  names ${name}, a platform member outside IC1's slice`));
+		} finally {
+			fs.rmSync(dir, { recursive: true, force: true });
+		}
+	}
+});
+
+test("I12: the runtime check allows only the thirteen built-ins, every global the built files name among them, so a platform global fails however it is named", () => {
+	assert.deepEqual(ALLOWED_GLOBALS, ["Array", "Error", "JSON", "Map", "Math", "Number", "Object", "Reflect", "Set", "String", "TypeError", "WeakMap", "undefined"]);
+	const named = new Set();
+	for (const file of fs.readdirSync(path.join(root, "dist")).filter((f) => f.endsWith(".js"))) {
+		for (const { name } of freeGlobalReferences(parseModule(fs.readFileSync(path.join(root, "dist", file), "utf8"), file))) named.add(name);
+	}
+	assert.deepEqual([...named].filter((name) => !ALLOWED_GLOBALS.includes(name)), [], "every global the built files name is one of the thirteen");
+	assert.deepEqual([...named].sort(), ["Array", "Error", "Map", "Number", "Object", "Reflect", "Set", "String", "TypeError", "undefined"], "the build names these ten of the thirteen");
+	const finding = (name) => `names the global ${name}, which is none of the thirteen built-ins`;
+	const globals = ["MessageChannel", "EventSource", "Worker", "SharedWorker", "BroadcastChannel", "RTCPeerConnection", "Atomics", "SharedArrayBuffer", "WebSocket", "XMLHttpRequest", "fetch", "navigator", "location", "localStorage", "indexedDB", "postMessage", "structuredClone", "queueMicrotask", "Promise", "Proxy", "Symbol", "Date", "Intl", "WeakRef", "arguments", "visualViewport", "PointerEvent", "KeyboardEvent", "FocusEvent", "WheelEvent", "EventTarget"];
+	for (const name of globals) {
+		assert.deepEqual(findRuntimeUses(`export const planted = () => ${name};\n`).map((f) => f.finding), [finding(name)], name);
+	}
+	assert.deepEqual(findRuntimeUses("export const a = new MessageChannel();\n").map((f) => f.finding), [finding("MessageChannel")], "constructed");
+	assert.deepEqual(findRuntimeUses("export const a = typeof Worker;\n").map((f) => f.finding), [finding("Worker")], "under typeof");
+	assert.deepEqual(findRuntimeUses("export const a = { Atomics };\n").map((f) => f.finding), [finding("Atomics")], "a shorthand property is a reference");
+	assert.deepEqual(findRuntimeUses("export function f() { return Worker; }\nfunction g() { const Worker = 1; return Worker; }\nexport { g };\n").map((f) => [f.line, f.finding]), [[1, finding("Worker")]], "a name declared in another scope does not cover this one");
+	const clean = [
+		`export const a = () => [${ALLOWED_GLOBALS.join(", ")}];\n`,
+		"const Worker = 1; export const a = Worker;\n",
+		"export const a = (MessageChannel) => MessageChannel;\n",
+		"export function f({ EventSource }) { return EventSource; }\n",
+		"export const a = (x) => x.Worker + x?.Atomics + ({ BroadcastChannel: 1 }).BroadcastChannel;\n",
+		"// MessageChannel, Worker and Atomics in a comment\nexport const s = \"new Worker(MessageChannel)\";\n",
+		"label: for (;;) { break label; }\nexport {};\n",
+		"try { void 0; } catch (error) { void error; }\nexport {};\n",
+		"import { Worker } from \"./worker.js\";\nexport const w = Worker;\n",
+	];
+	for (const text of clean) assert.deepEqual(findRuntimeUses(text), [], text);
+	const dir = scratch(Object.fromEntries(globals.slice(0, 7).map((name, i) => [`global-${i}.js`, `export const planted = () => ${name};\n`])));
+	try {
+		const r = run("check-runtime.mjs", dir);
+		assert.equal(r.status, 1);
+		globals.slice(0, 7).forEach((name, i) => assert.match(r.stdout, new RegExp(`global-${i}\\.js:1  names the global ${name},`)));
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
 });
 
 test("I12: the clock and chance check passes over dist, and fails on a clock, a timer, chance or a network planted in a built file -- by bracket or by destructuring too", () => {
