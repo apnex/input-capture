@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { openCapture } from "@apnex/input-capture";
-import { declarationOver, fakePlatform, keyEvent, pointerEvent } from "../support/fakes.js";
+import { declarationOver, fakePlatform, keyEvent, pointerEvent, wheelEvent } from "../support/fakes.js";
 import { isFrozenToDepth } from "../support/frozen.js";
 
 const ended = (name) => (e) => e.constructor === Error && e.message.startsWith(`${name}: `);
@@ -266,4 +266,21 @@ test("IC8: a nested delivery has its own reply, and the outer reply stays live w
 	assert.deepEqual(seen, [["inner", true], ["outer", true]]);
 	assert.deepEqual(calls(platform, "surface.setPointerCapture").map((c) => c.args[0]), [2, 1]);
 	assert.deepEqual([events.outer.prevented, events.inner.prevented], [1, 0]);
+});
+
+test("I17, IC8: a claim on a wheel fact and on a context-menu fact calls preventDefault once, with the event as receiver; takePointer takes a context menu's pointer and answers false for a wheel, which has none", () => {
+	const platform = fakePlatform();
+	const answers = [];
+	const result = openCapture({ ...declarationOver(platform, { listen: ["wheel", "context-menu"] }).declaration, deliver: (fact, reply) => {
+		answers.push([fact.type, reply.claim(), reply.claim(), reply.takePointer(), reply.takePointer()]);
+	} });
+	assert.equal(result.ok, true);
+	platform.log.length = 0;
+	const wheel = wheelEvent();
+	const menu = pointerEvent({ button: 2, buttons: 2, pointerId: 6 });
+	platform.surface.fire("wheel", wheel);
+	platform.surface.fire("contextmenu", menu);
+	assert.deepEqual(answers, [["wheel", undefined, undefined, false, false], ["context-menu", undefined, undefined, true, true]]);
+	assert.deepEqual([wheel.prevented, menu.prevented], [1, 1]);
+	assert.deepEqual(calls(platform, "surface.setPointerCapture").map((c) => c.args), [[6]], "only the context menu's pointer, once");
 });

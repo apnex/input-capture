@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { openCapture } from "@apnex/input-capture";
-import { declarationOver, fakePlatform, keyEvent, pointerEvent } from "../support/fakes.js";
+import { blurEvent, declarationOver, fakePlatform, keyEvent, pointerEvent, wheelEvent } from "../support/fakes.js";
 import { describe, isFrozenToDepth } from "../support/frozen.js";
 import { recorded, revoked, trapping } from "../support/recording-proxy.js";
 
@@ -175,7 +175,45 @@ test("What is returned: every record holds its properties in its written order, 
 	listener.call({ not: "the surface" }, pointerEvent());
 	Reflect.apply(listener, undefined, [pointerEvent()]);
 	assert.equal(delivered.length, 2, "a listener needs no receiver: the platform calls it with its own");
-	assert.equal(delivered[0], "type,at,screen,hit,focus,button,buttons,pointerId,pointerType,key,code,repeat,shiftKey,ctrlKey,altKey,metaKey");
+	assert.equal(delivered[0], "type,at,screen,hit,focus,button,buttons,pointerId,pointerType,key,code,repeat,shiftKey,ctrlKey,altKey,metaKey,deltaX,deltaY,deltaZ,deltaMode,time");
 	assert.equal(listener.length, 1, "a listener reads one argument");
 	assert.equal(listener(pointerEvent(), "extra", "arguments"), undefined);
+});
+
+test("Errors: the listeners `listen` adds refuse with a TypeError beginning with their platform event's name -- wheel, contextmenu, blur -- before deliver is called", () => {
+	const { platform, delivered } = opened({ listen: ["wheel", "context-menu", "blur"] });
+	for (const [on, name] of [["surface", "wheel"], ["surface", "contextmenu"], ["keys", "blur"]]) {
+		assert.throws(() => platform[on].fire(name, 5), (e) => e.constructor === TypeError && e.message.startsWith(`${name}: `), name);
+	}
+	assert.throws(() => platform.surface.fire("wheel", wheelEvent({ deltaY: NaN })), (e) => e.constructor === TypeError && e.message.startsWith("wheel: the event's deltaY"));
+	const event = blurEvent();
+	Object.defineProperty(event, "timeStamp", { get() {
+		throw new RangeError("the getter's own");
+	} });
+	assert.throws(() => platform.keys.fire("blur", event), (e) => e.constructor === TypeError && e.message === "blur: the event's timeStamp could not be read: an object");
+	assert.equal(delivered.length, 0);
+});
+
+test("I7: wheel, context-menu and blur facts are fresh and frozen to their depth, keys in their written order, and survive a JSON round trip but for -0", () => {
+	const hitAnswer = { deep: [1] };
+	const { platform, delivered } = opened({ listen: ["blur", "wheel", "context-menu"], hit: () => hitAnswer });
+	platform.surface.fire("wheel", wheelEvent({ deltaX: 1.5, deltaY: -2, deltaZ: 0, deltaMode: 1, timeStamp: 10 }));
+	platform.surface.fire("contextmenu", pointerEvent({ button: 2, timeStamp: 11 }));
+	platform.keys.fire("blur", blurEvent({ timeStamp: 12 }));
+	platform.surface.fire("wheel", wheelEvent({ deltaX: 1.5, deltaY: -2, deltaZ: 0, deltaMode: 1, timeStamp: 10 }));
+	assert.deepEqual(delivered.map((d) => d.fact.type), ["wheel", "context-menu", "blur", "wheel"]);
+	for (const { fact, reply } of delivered) {
+		assert.ok(isFrozenToDepth(fact, new Set([hitAnswer])), describe(fact));
+		assert.ok(isFrozenToDepth(reply));
+		assert.equal(Object.keys(fact).join(","), "type,at,screen,hit,focus,button,buttons,pointerId,pointerType,key,code,repeat,shiftKey,ctrlKey,altKey,metaKey,deltaX,deltaY,deltaZ,deltaMode,time");
+		assert.deepEqual(JSON.parse(JSON.stringify(fact)), fact);
+	}
+	assert.notEqual(delivered[0].fact, delivered[3].fact);
+	assert.equal(delivered[0].fact.hit, hitAnswer);
+	assert.equal(delivered[2].fact.hit, null, "no hit is asked for a blur");
+	platform.surface.fire("wheel", wheelEvent({ deltaX: -0, deltaY: -0, deltaZ: -0, timeStamp: -0 }));
+	const { fact } = delivered.at(-1);
+	const back = JSON.parse(JSON.stringify(fact));
+	assert.ok(Object.is(fact.deltaX, -0) && Object.is(back.deltaX, 0));
+	assert.deepEqual({ ...back, at: fact.at, screen: fact.screen, deltaX: -0, deltaY: -0, deltaZ: -0, time: -0 }, fact, "nothing else lost");
 });

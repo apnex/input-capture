@@ -4,8 +4,11 @@
  * An event is judged by typeof alone, which runs no trap, and its prototype is never read. Its fields are
  * read once each through ordinary property access -- a browser's being inherited accessors -- in IC6's
  * order, each judged as it is read, the reading stopping at the first refused: clientX is judged before
- * clientY is read, since an event is not a point. The conversion's answer is a point: its x and then its
- * y are read, both before either is judged, so a point with getters answers.
+ * clientY is read, since an event is not a point, and a wheel's deltaX before its deltaY. Every event's
+ * timeStamp is read, as data the platform delivered: a value that is no finite number is kept as none, and
+ * a getter that throws refuses the event, as every read does. A blur names no target, so none is read. The
+ * conversion's answer is a point: its x and then its y are read, both before either is judged, so a point
+ * with getters answers.
  *
  * A refusal is a TypeError whose message begins with the platform event's name and a colon, or with
  * "toDrawing: " for the conversion's answer; a value a getter or a trap threw is named after
@@ -15,7 +18,11 @@
  */
 import type { PlatformMethod } from "./declaration-reading.js";
 
-/** The fields of a pointer or double-click event, as read: each but the judged ones exactly as the event held it. */
+/**
+ * The fields of a pointer, double-click, context-menu or wheel event, as read: each but the judged ones exactly
+ * as the event held it; the deltas, judged finite, and deltaMode read of a wheel event alone, and null for any
+ * other.
+ */
 export interface PointerFields {
 	readonly clientX: number;
 	readonly clientY: number;
@@ -27,6 +34,11 @@ export interface PointerFields {
 	readonly ctrlKey: unknown;
 	readonly altKey: unknown;
 	readonly metaKey: unknown;
+	readonly deltaX: number | null;
+	readonly deltaY: number | null;
+	readonly deltaZ: number | null;
+	readonly deltaMode: unknown;
+	readonly timeStamp: unknown;
 	readonly target: unknown;
 	readonly preventDefault: PlatformMethod;
 }
@@ -40,7 +52,14 @@ export interface KeyFields {
 	readonly ctrlKey: unknown;
 	readonly altKey: unknown;
 	readonly metaKey: unknown;
+	readonly timeStamp: unknown;
 	readonly target: unknown;
+	readonly preventDefault: PlatformMethod;
+}
+
+/** The fields of the key source's blur, as read: no target, which nothing would be handed. */
+export interface BlurFields {
+	readonly timeStamp: unknown;
 	readonly preventDefault: PlatformMethod;
 }
 
@@ -81,11 +100,19 @@ function readPreventDefault(name: string, event: object): PlatformMethod {
 	return preventDefault as PlatformMethod;
 }
 
+/** One delta of a wheel event, read once and refused unless a finite number. */
+function readDelta(name: string, event: object, field: string): number {
+	const delta = readField(name, event, field);
+	if (!isFiniteNumber(delta)) throw new TypeError(`${name}: the event's ${field} must be a finite number`);
+	return delta;
+}
+
 /**
- * IC6 steps 1 and 2 for a pointer or double-click event: clientX, clientY, button, buttons, pointerId,
- * pointerType, the modifiers, target and preventDefault, each read once and judged as it is read.
+ * IC6 steps 1 and 2 for a pointer, double-click, context-menu or wheel event: clientX, clientY, button,
+ * buttons, pointerId, pointerType, the modifiers, for a wheel event deltaX, deltaY, deltaZ and deltaMode, then
+ * timeStamp, target and preventDefault, each read once and judged as it is read.
  */
-export function readPointerFields(name: string, given: unknown): PointerFields {
+export function readPointerFields(name: string, given: unknown, wheel: boolean): PointerFields {
 	const event = requireEvent(name, given);
 	const clientX = readField(name, event, "clientX");
 	if (!isFiniteNumber(clientX)) throw new TypeError(`${name}: the event's clientX must be a finite number`);
@@ -100,12 +127,24 @@ export function readPointerFields(name: string, given: unknown): PointerFields {
 	const ctrlKey = readField(name, event, "ctrlKey");
 	const altKey = readField(name, event, "altKey");
 	const metaKey = readField(name, event, "metaKey");
+	let deltaX: number | null = null;
+	let deltaY: number | null = null;
+	let deltaZ: number | null = null;
+	let deltaMode: unknown = null;
+	if (wheel) {
+		deltaX = readDelta(name, event, "deltaX");
+		deltaY = readDelta(name, event, "deltaY");
+		deltaZ = readDelta(name, event, "deltaZ");
+		// never refusing: a value that is no unit is kept as none (IC5)
+		deltaMode = readField(name, event, "deltaMode");
+	}
+	const timeStamp = readField(name, event, "timeStamp");
 	const target = readField(name, event, "target");
 	const preventDefault = readPreventDefault(name, event);
-	return { clientX, clientY, button: button as number | null | undefined, buttons, pointerId, pointerType, shiftKey, ctrlKey, altKey, metaKey, target, preventDefault };
+	return { clientX, clientY, button: button as number | null | undefined, buttons, pointerId, pointerType, shiftKey, ctrlKey, altKey, metaKey, deltaX, deltaY, deltaZ, deltaMode, timeStamp, target, preventDefault };
 }
 
-/** IC6 steps 1 and 2 for a key event: key, code, repeat, the modifiers, target and preventDefault; no coordinate and no button. */
+/** IC6 steps 1 and 2 for a key event: key, code, repeat, the modifiers, timeStamp, target and preventDefault; no coordinate and no button. */
 export function readKeyFields(name: string, given: unknown): KeyFields {
 	const event = requireEvent(name, given);
 	const key = readField(name, event, "key");
@@ -115,9 +154,18 @@ export function readKeyFields(name: string, given: unknown): KeyFields {
 	const ctrlKey = readField(name, event, "ctrlKey");
 	const altKey = readField(name, event, "altKey");
 	const metaKey = readField(name, event, "metaKey");
+	const timeStamp = readField(name, event, "timeStamp");
 	const target = readField(name, event, "target");
 	const preventDefault = readPreventDefault(name, event);
-	return { key, code, repeat, shiftKey, ctrlKey, altKey, metaKey, target, preventDefault };
+	return { key, code, repeat, shiftKey, ctrlKey, altKey, metaKey, timeStamp, target, preventDefault };
+}
+
+/** IC6 steps 1 and 2 for the key source's blur: timeStamp, then preventDefault; no target. */
+export function readBlurFields(name: string, given: unknown): BlurFields {
+	const event = requireEvent(name, given);
+	const timeStamp = readField(name, event, "timeStamp");
+	const preventDefault = readPreventDefault(name, event);
+	return { timeStamp, preventDefault };
 }
 
 /** IC2 rule 4 and IC6 step 3: the conversion's answer, judged by typeof, its x then its y read, both before either is judged. */

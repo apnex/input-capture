@@ -7,7 +7,7 @@ import { test } from "node:test";
 import vm from "node:vm";
 
 import { openCapture } from "@apnex/input-capture";
-import { declarationOver, fakeObject, fakePlatform, keyEvent, pointerEvent } from "../support/fakes.js";
+import { blurEvent, declarationOver, fakeObject, fakePlatform, keyEvent, PlatformSurface, PlatformWheelEvent, pointerEvent, wheelEvent } from "../support/fakes.js";
 import { isFrozenToDepth } from "../support/frozen.js";
 import { phantom, recorded, revoked, trapping } from "../support/recording-proxy.js";
 
@@ -354,4 +354,277 @@ test("IC3: two captures on one surface are independent; a capture opened from in
 	listeners[1](pointerEvent());
 	assert.deepEqual([first, second], [["down"], ["down", "down"]]);
 	b.capture.close();
+});
+
+// ---- 0.2.0: listen (IC3 steps 7 to 9, IC2 rule 2) and the listeners it adds (IC4) ----
+
+const LISTENED = [["wheel", "wheel", "surface"], ["context-menu", "contextmenu", "surface"], ["blur", "blur", "keys"]];
+/** Every ordering of every subset of the three names. */
+function orderings(names = ["wheel", "context-menu", "blur"]) {
+	const out = [[]];
+	for (const name of names) for (const rest of orderings(names.filter((n) => n !== name))) out.push([name, ...rest]);
+	return [...new Map(out.map((o) => [o.join(","), o])).values()];
+}
+
+test("I13: listen absent, empty, or naming each name opens; 'blur' with keys opens", () => {
+	assert.equal(openCapture(valid()).ok, true, "absent");
+	assert.equal(openCapture({ ...valid(), listen: [] }).ok, true, "empty");
+	assert.equal(openCapture({ ...valid(), listen: ["wheel"] }).ok, true);
+	assert.equal(openCapture({ ...valid(), listen: ["context-menu"] }).ok, true);
+	assert.equal(openCapture({ ...valid(), keys: keysFake(), listen: ["blur"] }).ok, true);
+	for (const listen of orderings()) assert.equal(openCapture({ ...valid(), keys: keysFake(), listen }).ok, true, listen.join(","));
+	assert.equal(openCapture(phantom(valid(), "listen")).ok, true, "a phantom listen -- its descriptor undefined -- is absent");
+	assert.equal(openCapture({ ...valid(), listen: Object.assign(["wheel"], { [Symbol("s")]: 1 }) }).ok, true, "a symbol-named property of the array is ignored");
+});
+
+test("I13, IC3 step 2: listen is the seventh property, so it is no unknown property; an eighth is", () => {
+	assert.deepEqual(problemsOf({ ...valid(), listen: ["wheel"], listens: ["wheel"] }), [p("/listens", "unknown-property")]);
+});
+
+test("I13, IC3 step 7: an accessor, undefined, a value that is no array of this realm's Array.prototype, a sparse array or one holding another string-named property is invalid-value at /listen, nothing beneath it reported", () => {
+	const base = { ...valid(), keys: keysFake() };
+	const sparse = ["wheel", , "blur"]; // eslint-disable-line no-sparse-arrays
+	const holed = ["wheel", "blur"];
+	delete holed[0];
+	class Names extends Array {}
+	const cases = [
+		["present as undefined", undefined],
+		["null", null],
+		["a string", "wheel"],
+		["an object shaped like an array", { 0: "wheel", length: 1 }],
+		["a function", Object.assign(() => 0, { 0: "wheel" })],
+		["a sparse array", sparse],
+		["an array with a hole made by delete", holed],
+		["an array holding another string-named property", Object.assign(["wheel"], { extra: 1 })],
+		["an array of another prototype", Object.setPrototypeOf(["wheel"], Object.prototype)],
+		["an Array subclass", Names.from(["wheel"])],
+		["another realm's array", vm.runInNewContext("['wheel']")],
+		["a revoked Proxy of an array", revoked(["wheel"])],
+		["a Proxy whose ownKeys throws", trapping(["wheel"], "ownKeys")],
+		["a Proxy whose getPrototypeOf throws", trapping(["wheel"], "getPrototypeOf")],
+		["a Proxy whose getOwnPropertyDescriptor throws", trapping(["wheel"], "getOwnPropertyDescriptor")],
+		["an accessor element", Object.defineProperty(["wheel", "blur"], 1, { get: neverCalled("an element's getter"), enumerable: true })],
+		["a Proxy listing an index whose descriptor reads undefined", phantom([], "0")],
+		["unknown names before an accessor element", Object.defineProperty(["nope", "wheel", "wheel"], 3, { get: neverCalled("an element's getter"), enumerable: true })],
+	];
+	for (const [label, listen] of cases) assert.deepEqual(problemsOf({ ...base, listen }), [p("/listen", "invalid-value")], label);
+	assert.deepEqual(problemsOf(accessor({ ...base }, "listen")), [p("/listen", "invalid-value")], "an accessor, its getter never called");
+	assert.deepEqual(problemsOf({ surface: 5, listen: null }), [p("/deliver", "missing-property"), p("/listen", "invalid-value"), p("/surface", "invalid-value"), p("/toDrawing", "missing-property")], "beside every other problem");
+});
+
+test("I13, IC3 step 8: an element none of the three names, or equal to an earlier element, is invalid-value at /listen/<i>", () => {
+	const base = { ...valid(), keys: keysFake() };
+	for (const element of ["scroll", "Wheel", "contextmenu", "focus", "", 0, null, undefined, {}, ["wheel"], true, 1n]) {
+		assert.deepEqual(problemsOf({ ...base, listen: ["wheel", element] }), [p("/listen/1", "invalid-value")], label(element));
+	}
+	assert.deepEqual(problemsOf({ ...base, listen: ["wheel", "wheel"] }), [p("/listen/1", "invalid-value")], "a duplicate");
+	assert.deepEqual(problemsOf({ ...base, listen: ["blur", "context-menu", "blur"] }), [p("/listen/2", "invalid-value")], "a duplicate blur");
+	assert.deepEqual(problemsOf({ ...base, listen: ["x", "wheel", "wheel", "y", "context-menu", "wheel"] }), [p("/listen/0", "invalid-value"), p("/listen/2", "invalid-value"), p("/listen/3", "invalid-value"), p("/listen/5", "invalid-value")], "each refused element at its own index, the list ordered by pointer");
+	const many = Array.from({ length: 12 }, (_, i) => (i === 0 ? "wheel" : "wheel"));
+	assert.deepEqual(problemsOf({ ...base, listen: many }), Array.from({ length: 11 }, (_, i) => `/listen/${i + 1}`).sort().map((pointer) => p(pointer, "invalid-value")), "pointers ordered by UTF-16 code unit, so /listen/10 before /listen/2");
+});
+
+test("I13, IC3 step 9: 'blur' with keys absent is invalid-value at its index; keys undefined and keys 5 are refused at /keys alone; a duplicate blur without keys by step 8 alone; focus without keys beside it", () => {
+	assert.deepEqual(problemsOf({ ...valid(), listen: ["blur"] }), [p("/listen/0", "invalid-value")], "keys absent");
+	assert.deepEqual(problemsOf({ ...valid(), listen: ["wheel", "blur"] }), [p("/listen/1", "invalid-value")]);
+	assert.deepEqual(problemsOf(phantom({ ...valid(), listen: ["blur"] }, "keys")), [p("/listen/0", "invalid-value")], "a phantom keys is absent, as step 6 tests it");
+	assert.deepEqual(problemsOf({ ...valid(), keys: undefined, listen: ["blur"] }), [p("/keys", "invalid-value")], "keys present as undefined: step 4 alone");
+	assert.deepEqual(problemsOf({ ...valid(), keys: 5, listen: ["blur"] }), [p("/keys", "invalid-value")], "keys 5: step 4 alone");
+	assert.deepEqual(problemsOf({ ...valid(), listen: ["blur", "blur"] }), [p("/listen/0", "invalid-value"), p("/listen/1", "invalid-value")], "the first by step 9, the second by step 8 alone");
+	assert.deepEqual(problemsOf({ ...valid(), focus: () => 1, listen: ["blur"] }), [p("/focus", "invalid-value"), p("/listen/0", "invalid-value")], "focus without keys beside it");
+	assert.equal(openCapture({ ...valid(), keys: keysFake(), listen: ["blur"] }).ok, true);
+	const surface = surfaceFake();
+	assert.equal(openCapture({ ...valid(), surface, keys: surface, listen: ["blur"] }).ok, true, "the surface as its own key source");
+});
+
+test("I13, IC2 rule 2: the reads in order -- prototype, own keys, the seven descriptors held, the surface's three members, the key source's two, then listen's array: Array.isArray, its prototype, its own keys, its length's descriptor and each index's in order", () => {
+	const log = [];
+	const surface = recorded(surfaceFake(), "surface", log);
+	const keys = recorded(keysFake(), "keys", log);
+	const listen = recorded(["blur", "wheel"], "listen", log);
+	const declaration = recorded({ listen, deliver() {}, focus: () => 1, hit: () => 1, toDrawing: (s) => s, keys, surface }, "declaration", log);
+	assert.equal(openCapture(declaration).ok, true);
+	const opening = log.splice(0, log.findIndex((l) => l.startsWith("listen ")) + 6);
+	assert.deepEqual(opening, [
+		"declaration getPrototypeOf",
+		"declaration ownKeys",
+		...["surface", "keys", "toDrawing", "hit", "focus", "deliver", "listen"].map((n) => `declaration getOwnPropertyDescriptor ${n}`),
+		"surface get addEventListener",
+		"surface get removeEventListener",
+		"surface get setPointerCapture",
+		"keys get addEventListener",
+		"keys get removeEventListener",
+		"listen getPrototypeOf",
+		"listen ownKeys",
+		"listen getOwnPropertyDescriptor length",
+		"listen getOwnPropertyDescriptor 0",
+		"listen getOwnPropertyDescriptor 1",
+	], "Array.isArray runs no trap; nothing of the array is read twice and no element's value is read but through its descriptor");
+	assert.ok(!log.some((l) => l.startsWith("listen ") || l.startsWith("declaration ")), "nothing more of the declaration or the array is read once it opens");
+	const refused = [];
+	const sparse = recorded(["wheel", , "blur"], "listen", refused); // eslint-disable-line no-sparse-arrays
+	problemsOf({ ...valid(), keys: keysFake(), listen: sparse });
+	assert.deepEqual(refused, ["listen getPrototypeOf", "listen ownKeys", "listen getOwnPropertyDescriptor length"], "a sparse array is refused once its length is read: no index's descriptor is read");
+	const stopped = [];
+	const extra = recorded(Object.assign(["wheel"], { extra: 1 }), "listen", stopped);
+	problemsOf({ ...valid(), listen: extra });
+	assert.deepEqual(stopped, ["listen getPrototypeOf", "listen ownKeys"], "a key that is neither length nor an index refuses it at its own keys");
+	const foreign = [];
+	problemsOf({ ...valid(), listen: recorded(vm.runInNewContext("['wheel']"), "listen", foreign) });
+	assert.deepEqual(foreign, ["listen getPrototypeOf"], "another realm's array is refused at its prototype");
+	const accessorElement = [];
+	problemsOf({ ...valid(), listen: recorded(Object.defineProperty(["context-menu", "wheel", "x"], 1, { get: neverCalled("an element's getter"), enumerable: true }), "listen", accessorElement) });
+	assert.deepEqual(accessorElement.slice(-2), ["listen getOwnPropertyDescriptor 0", "listen getOwnPropertyDescriptor 1"], "the reading stops at the accessor element: index 2 is never read");
+	const unreadDeclaration = [];
+	const notRead = recorded(["wheel"], "listen", unreadDeclaration);
+	problemsOf(recorded({ ...valid(), listen: notRead }, "declaration", unreadDeclaration, { getOwnPropertyDescriptor: (t, key) => {
+		if (key === "listen") throw new Error("no descriptor");
+		return Reflect.getOwnPropertyDescriptor(t, key);
+	} }));
+	assert.ok(!unreadDeclaration.some((l) => l.startsWith("listen ")), "a declaration whose listen descriptor cannot be read is not-an-object at \"\", and its array is never read");
+});
+
+test("I13: listen's array is read last, so a surface member's getter that appends to it is seen; the array is read whatever else the declaration's problems are", () => {
+	const listen = [];
+	const surface = {
+		get addEventListener() {
+			listen.push("wheel");
+			return () => {};
+		},
+		removeEventListener() {},
+		setPointerCapture() {},
+	};
+	const adds = [];
+	const opened = openCapture({ surface: Object.create(surface), toDrawing: (s) => s, deliver() {}, listen });
+	assert.equal(opened.ok, true);
+	assert.deepEqual(listen, ["wheel"], "the getter ran before the array was read");
+	const seen = [];
+	const keysWithGetter = {
+		addEventListener(...args) {
+			seen.push(args[0]);
+		},
+		get removeEventListener() {
+			listenTwo.push("nope");
+			return () => {};
+		},
+	};
+	const listenTwo = ["blur"];
+	assert.deepEqual(problemsOf({ ...valid(), keys: keysWithGetter, listen: listenTwo }), [p("/listen/1", "invalid-value")], "an element the key source's getter appended is judged");
+	const third = ["wheel"];
+	const surfaceAdding = { addEventListener: (name, listener, options) => adds.push([name, options]), removeEventListener() {}, get setPointerCapture() {
+		third.push("context-menu");
+		return () => {};
+	} };
+	assert.equal(openCapture({ surface: surfaceAdding, toDrawing: (s) => s, deliver() {}, listen: third }).ok, true);
+	assert.deepEqual(adds.slice(8).map(([name]) => name), ["wheel", "contextmenu"], "the appended name is listened for");
+	const log = [];
+	problemsOf({ surface: recorded(surfaceFake(), "surface", log), listen: recorded(["nope"], "listen", log) });
+	assert.deepEqual(log.filter((l) => l.startsWith("listen ")), ["listen getPrototypeOf", "listen ownKeys", "listen getOwnPropertyDescriptor length", "listen getOwnPropertyDescriptor 0"], "read though toDrawing and deliver are missing");
+});
+
+test("I14: with listen absent or empty, exactly I2's listeners, arguments and calls", () => {
+	for (const extra of [{}, { listen: [] }]) {
+		const platform = fakePlatform();
+		openCapture(declarationOver(platform, extra).declaration);
+		assert.deepEqual(platform.log.map((c) => [c.call, c.args[0], c.args.length]), [...POINTER.map((n) => ["surface.addEventListener", n, 2]), ...KEYS.map((n) => ["keys.addEventListener", n, 2])]);
+	}
+});
+
+test("I14: the names listed in every order add their listeners after IC4's ten, in the table's order -- wheel's with a fresh frozen { passive: false } as third argument, the others with two", () => {
+	const options = new Set();
+	for (const listen of orderings()) {
+		const platform = fakePlatform();
+		const { declaration, delivered } = declarationOver(platform, { listen });
+		assert.equal(openCapture(declaration).ok, true, listen.join(","));
+		const expected = LISTENED.filter(([n]) => listen.includes(n));
+		assert.deepEqual(platform.log.slice(0, 10).map((c) => [c.call, c.args[0], c.args.length]), [...POINTER.map((n) => ["surface.addEventListener", n, 2]), ...KEYS.map((n) => ["keys.addEventListener", n, 2])], "IC4's ten first");
+		const after = platform.log.slice(10);
+		assert.deepEqual(after.map((c) => [c.call, c.args[0], c.args.length]), expected.map(([n, event, on]) => [`${on}.addEventListener`, event, n === "wheel" ? 3 : 2]), `${listen.join(",")}: the table's order`);
+		for (const c of after) {
+			assert.equal(c.self, c.call.startsWith("surface") ? platform.surface.object : platform.keys.object, "on the right object");
+			assert.equal(typeof c.args[1], "function");
+			assert.ok(Object.isFrozen(c.args[1]));
+			if (c.args[0] === "wheel") {
+				const third = c.args[2];
+				assert.deepEqual(Object.keys(third), ["passive"]);
+				assert.equal(third.passive, false);
+				assert.equal(Object.getPrototypeOf(third), Object.prototype);
+				assert.ok(Object.isFrozen(third), "frozen");
+				assert.ok(!options.has(third), "fresh: made for that call");
+				options.add(third);
+			}
+		}
+		assert.equal(new Set(platform.log.map((c) => c.args[1])).size, 10 + expected.length, "a listener of its own for each event");
+		for (const [n, event, on] of expected) {
+			platform[on].fire(event, n === "wheel" ? wheelEvent() : n === "blur" ? blurEvent() : pointerEvent());
+			assert.equal(delivered.at(-1).fact.type, n, `${event} makes a ${n} fact`);
+		}
+	}
+	assert.ok(options.size >= 2);
+});
+
+test("I14: without a key source, wheel and context-menu are added to the surface; the surface as key source takes the blur listener through the key source's reading", () => {
+	const platform = fakePlatform();
+	const { declaration } = declarationOver(platform, { listen: ["context-menu", "wheel"] });
+	delete declaration.keys;
+	openCapture(declaration);
+	assert.deepEqual(platform.log.map((c) => [c.call, c.args[0], c.args.length]), [...POINTER.map((n) => ["surface.addEventListener", n, 2]), ["surface.addEventListener", "wheel", 3], ["surface.addEventListener", "contextmenu", 2]]);
+	const log = [];
+	const keyReading = [];
+	const own = { addEventListener: (...args) => log.push(["surface's own", args[0]]), removeEventListener() {}, setPointerCapture() {} };
+	let reads = 0;
+	const same = Object.defineProperty({ ...own }, "addEventListener", { get() {
+		reads++;
+		const role = reads === 1 ? "as surface" : "as key source";
+		return (...args) => keyReading.push([role, args[0], args.length]);
+	} });
+	openCapture({ surface: same, keys: same, toDrawing: (s) => s, deliver() {}, listen: ["blur", "wheel"] });
+	assert.deepEqual(keyReading.filter(([, name]) => ["wheel", "blur", "keydown", "keyup"].includes(name)), [["as key source", "keydown", 2], ["as key source", "keyup", 2], ["as surface", "wheel", 3], ["as key source", "blur", 2]]);
+});
+
+test("I14: an addEventListener throwing at each of the new listeners, before or after adding it, takes back every listener with two arguments and throws its error", () => {
+	for (const addThenThrow of [false, true]) {
+		for (const at of [10, 11, 12]) {
+			const onSurface = at < 12;
+			const platform = fakePlatform(onSurface ? { surface: { throwOnAdd: at - 2, addThenThrow } } : { keys: { throwOnAdd: 2, addThenThrow } });
+			const { declaration, delivered } = declarationOver(platform, { listen: ["blur", "context-menu", "wheel"] });
+			assert.throws(() => openCapture(declaration), (e) => e instanceof Error && /refused/.test(e.message));
+			assert.equal(platform.surface.live.size + platform.keys.live.size, 0, `throw at ${at}: none left`);
+			const adds = platform.log.filter((c) => c.call.endsWith("addEventListener"));
+			const removes = platform.log.filter((c) => c.call.endsWith("removeEventListener"));
+			assert.equal(adds.length, at + 1);
+			assert.deepEqual(removes.map((c) => [c.call.replace("remove", "add"), c.args[0], c.args[1]]), [adds[at], ...adds.slice(0, at).reverse()].map((c) => [c.call, c.args[0], c.args[1]]), "that very listener first, then the rest in reverse");
+			assert.ok(removes.every((c) => c.args.length === 2), "every removal with two arguments, wheel's included");
+			if (addThenThrow) adds[at].args[1](at === 10 ? wheelEvent() : at === 11 ? pointerEvent() : blurEvent());
+			assert.equal(delivered.length, 0, "a listener the platform kept makes no fact");
+		}
+	}
+});
+
+test("I14: close removes every listener in reverse, each with two arguments, wheel's included", () => {
+	const platform = fakePlatform();
+	const { capture } = openCapture(declarationOver(platform, { listen: ["wheel", "blur", "context-menu"] }).declaration);
+	const adds = platform.log.splice(0);
+	assert.equal(adds.length, 13);
+	assert.equal(capture.close(), undefined);
+	assert.deepEqual(platform.log.map((c) => [c.call, c.args[0], c.args[1], c.args.length]), adds.reverse().map((c) => [c.call.replace("add", "remove"), c.args[0], c.args[1], 2]));
+	assert.equal(platform.surface.live.size + platform.keys.live.size, 0);
+	assert.equal(capture.close(), undefined);
+	assert.equal(platform.log.length, 13, "a second close calls nothing");
+});
+
+test("I14, IC4: over Node.js's own EventTarget, a listener added with { passive: false } is removed by close with two arguments, since a platform matches a listener by its type, function and capture flag alone", () => {
+	const surface = new PlatformSurface();
+	const seen = [];
+	const { capture } = openCapture({ surface, toDrawing: (s) => s, deliver: (fact, reply) => {
+		seen.push(fact.type);
+		reply.claim();
+	}, listen: ["wheel"] });
+	const wheel = new PlatformWheelEvent("wheel", { deltaY: 3 });
+	surface.dispatchEvent(wheel);
+	assert.deepEqual(seen, ["wheel"]);
+	assert.equal(wheel.defaultPrevented, true, "a claim on a non-passive listener prevents");
+	capture.close();
+	surface.dispatchEvent(new PlatformWheelEvent("wheel", { deltaY: 3 }));
+	assert.deepEqual(seen, ["wheel"], "removed");
 });

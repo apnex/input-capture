@@ -6,11 +6,13 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { openCapture } from "@apnex/input-capture";
-import { declarationOver, fakePlatform, keyEvent, PlatformPointerEvent, PlatformSurface, pointerEvent } from "../support/fakes.js";
+import { declarationOver, fakePlatform, keyEvent, PlatformPointerEvent, PlatformSurface, PlatformWheelEvent, pointerEvent, wheelEvent } from "../support/fakes.js";
 import { recorded } from "../support/recording-proxy.js";
 
 const POINTER = [["pointerleave", "leave"], ["pointerdown", "down"], ["pointermove", "move"], ["pointerup", "up"], ["pointercancel", "cancel"], ["pointerover", "over"], ["pointerout", "out"], ["dblclick", "double"]];
-const FIELDS = ["clientX", "clientY", "button", "buttons", "pointerId", "pointerType", "shiftKey", "ctrlKey", "altKey", "metaKey", "target", "preventDefault"];
+const FIELDS = ["clientX", "clientY", "button", "buttons", "pointerId", "pointerType", "shiftKey", "ctrlKey", "altKey", "metaKey", "timeStamp", "target", "preventDefault"];
+const WHEEL_FIELDS = ["clientX", "clientY", "button", "buttons", "pointerId", "pointerType", "shiftKey", "ctrlKey", "altKey", "metaKey", "deltaX", "deltaY", "deltaZ", "deltaMode", "timeStamp", "target", "preventDefault"];
+const KEYS_OF_A_FACT = ["type", "at", "screen", "hit", "focus", "button", "buttons", "pointerId", "pointerType", "key", "code", "repeat", "shiftKey", "ctrlKey", "altKey", "metaKey", "deltaX", "deltaY", "deltaZ", "deltaMode", "time"];
 const refused = (name, call, also = () => true) => assert.throws(call, (e) => e instanceof TypeError && e.message.startsWith(`${name}: `) && also(e), `refused with a TypeError beginning "${name}: "`);
 
 /** An open capture over fresh fakes; `extra` overrides the declaration. */
@@ -48,13 +50,13 @@ test("IC4: each of the eight pointer events on the surface becomes one fact of i
 	}
 });
 
-test("IC5: a pointer fact holds exactly its sixteen properties, in order, its key fields null", () => {
+test("IC5: a pointer fact holds exactly its twenty-one properties, in order, its key and wheel fields null, its time the event's timeStamp", () => {
 	const target = { kind: "child" };
 	const { platform, delivered } = opened({ hit: () => "the hit" });
-	platform.surface.fire("pointerdown", pointerEvent({ clientX: 10.25, clientY: -3, button: 0, buttons: 1, pointerId: 9, pointerType: "pen", shiftKey: true, metaKey: 1, target, key: "x", code: "KeyX", repeat: true }));
+	platform.surface.fire("pointerdown", pointerEvent({ clientX: 10.25, clientY: -3, button: 0, buttons: 1, pointerId: 9, pointerType: "pen", shiftKey: true, metaKey: 1, target, key: "x", code: "KeyX", repeat: true, deltaX: 4, deltaY: 5, deltaZ: 6, deltaMode: 1, timeStamp: 1234.125 }));
 	const { fact } = delivered[0];
-	assert.deepEqual(Object.keys(fact), ["type", "at", "screen", "hit", "focus", "button", "buttons", "pointerId", "pointerType", "key", "code", "repeat", "shiftKey", "ctrlKey", "altKey", "metaKey"]);
-	assert.deepEqual(fact, { type: "down", at: { x: 20.5, y: -6 }, screen: { x: 10.25, y: -3 }, hit: "the hit", focus: null, button: 0, buttons: 1, pointerId: 9, pointerType: "pen", key: null, code: null, repeat: null, shiftKey: true, ctrlKey: false, altKey: false, metaKey: true });
+	assert.deepEqual(Object.keys(fact), ["type", "at", "screen", "hit", "focus", "button", "buttons", "pointerId", "pointerType", "key", "code", "repeat", "shiftKey", "ctrlKey", "altKey", "metaKey", "deltaX", "deltaY", "deltaZ", "deltaMode", "time"]);
+	assert.deepEqual(fact, { type: "down", at: { x: 20.5, y: -6 }, screen: { x: 10.25, y: -3 }, hit: "the hit", focus: null, button: 0, buttons: 1, pointerId: 9, pointerType: "pen", key: null, code: null, repeat: null, shiftKey: true, ctrlKey: false, altKey: false, metaKey: true, deltaX: null, deltaY: null, deltaZ: null, deltaMode: null, time: 1234.125 });
 	assert.deepEqual(Object.keys(fact.at), ["x", "y"]);
 	assert.deepEqual(Object.keys(fact.screen), ["x", "y"]);
 });
@@ -319,7 +321,7 @@ test("I3: capture touches nothing of the platform outside IC1 -- opening, a poin
 		...FIELDS.map((f) => `pointer get ${f}`),
 		"call pointer.preventDefault",
 		"call surface.setPointerCapture 3",
-		...["key", "code", "repeat", "shiftKey", "ctrlKey", "altKey", "metaKey", "target", "preventDefault"].map((f) => `key get ${f}`),
+		...["key", "code", "repeat", "shiftKey", "ctrlKey", "altKey", "metaKey", "timeStamp", "target", "preventDefault"].map((f) => `key get ${f}`),
 		"call key.preventDefault",
 		"call keys.removeEventListener keyup true",
 		"call keys.removeEventListener keydown true",
@@ -437,4 +439,197 @@ test("IC4: capture queues and merges nothing -- a key event delivered to a point
 	const { platform, delivered } = opened();
 	refused("pointermove", () => platform.surface.fire("pointermove", keyEvent()));
 	assert.equal(delivered.length, 0);
+});
+
+// ---- 0.2.0: the wheel and the context menu as pointer facts (IC4, IC5, IC6), and every fact's time ----
+
+test("I15: a wheel event's fact holds its deltas under Object.is, -0 among them, and ctrlKey as given; its keys in IC5's order", () => {
+	const { platform, delivered } = opened({ listen: ["wheel"], hit: () => "under" });
+	const cases = [[0, 120, 0], [-0, -0, -0], [1.5, -2.959766149520874, 1e-300], [-Number.MAX_VALUE, Number.MAX_VALUE, Number.MIN_VALUE], [0.1 + 0.2, -3.3163959980010986, 7]];
+	for (const [deltaX, deltaY, deltaZ] of cases) {
+		for (const ctrlKey of [false, true]) {
+			platform.surface.fire("wheel", wheelEvent({ deltaX, deltaY, deltaZ, ctrlKey, clientX: 3, clientY: 4, timeStamp: 55.5 }));
+			const { fact } = delivered.at(-1);
+			assert.deepEqual(Object.keys(fact), KEYS_OF_A_FACT);
+			assert.equal(fact.type, "wheel");
+			assert.ok(Object.is(fact.deltaX, deltaX) && Object.is(fact.deltaY, deltaY) && Object.is(fact.deltaZ, deltaZ), `${deltaX}, ${deltaY}, ${deltaZ}`);
+			assert.equal(fact.ctrlKey, ctrlKey, "ctrlKey as given: a pinch and Ctrl with the wheel alike");
+		}
+	}
+	platform.surface.fire("wheel", wheelEvent({ deltaX: -0, deltaY: 30, deltaZ: 0, deltaMode: 1, clientX: 3, clientY: 4, timeStamp: 55.5, buttons: 1, shiftKey: true }));
+	assert.deepEqual(delivered.at(-1).fact, { type: "wheel", at: { x: 6, y: 8 }, screen: { x: 3, y: 4 }, hit: "under", focus: null, button: 0, buttons: 1, pointerId: null, pointerType: null, key: null, code: null, repeat: null, shiftKey: true, ctrlKey: false, altKey: false, metaKey: false, deltaX: -0, deltaY: 30, deltaZ: 0, deltaMode: 1, time: 55.5 });
+});
+
+test("I15: deltaMode 0, 1, 2 and -0 give 0, 1, 2 and 0; any other value null, never refusing", () => {
+	const { platform, delivered } = opened({ listen: ["wheel"] });
+	const mode = (deltaMode, drop = false) => {
+		const event = wheelEvent({ deltaMode });
+		if (drop) delete event.deltaMode;
+		platform.surface.fire("wheel", event);
+		return delivered.at(-1).fact.deltaMode;
+	};
+	assert.equal(mode(0), 0);
+	assert.equal(mode(1), 1);
+	assert.equal(mode(2), 2);
+	assert.ok(Object.is(mode(-0), 0), "-0 gives 0, written v + 0");
+	for (const other of [3, -1, 0.5, 1.0000001, NaN, Infinity, "1", "0", null, undefined, true, false, 1n, {}, [1]]) assert.equal(mode(other), null, String(other));
+	assert.equal(mode(undefined, true), null, "absent");
+});
+
+test("I15: a non-finite delta refuses the event with no later field read and nothing called; deltaMode is read, never refusing, after the deltas", () => {
+	for (const field of ["deltaX", "deltaY", "deltaZ"]) {
+		for (const bad of [NaN, Infinity, -Infinity, "1", null, undefined, 1n, {}]) {
+			const log = [];
+			const { platform } = opened({ listen: ["wheel"], toDrawing: () => (log.push("toDrawing"), { x: 0, y: 0 }), hit: () => log.push("hit"), deliver: () => log.push("deliver") });
+			refused("wheel", () => platform.surface.fire("wheel", recorded(wheelEvent({ [field]: bad }), "event", log)), (e) => e.message.includes(field));
+			assert.deepEqual(log, WHEEL_FIELDS.slice(0, WHEEL_FIELDS.indexOf(field) + 1).map((f) => `event get ${f}`), `${field} ${String(bad)}: stopped there`);
+		}
+	}
+	for (const field of WHEEL_FIELDS) {
+		const log = [];
+		const { platform } = opened({ listen: ["wheel"], deliver: () => log.push("deliver") });
+		const hooks = { get: (t, k) => (k === field ? (() => { throw `no ${field}`; })() : t[k]) };
+		refused("wheel", () => platform.surface.fire("wheel", recorded(wheelEvent(), "event", log, hooks)), (e) => e.message.includes(`could not be read: no ${field}`));
+		assert.deepEqual(log, WHEEL_FIELDS.slice(0, WHEEL_FIELDS.indexOf(field) + 1).map((f) => `event get ${f}`), `a getter throwing at ${field}`);
+	}
+});
+
+test("I15, IC6: a wheel event's reads in order -- the pointer fields, the modifiers, deltaX, deltaY, deltaZ, deltaMode, timeStamp, target, preventDefault -- then the conversion, the hit and the delivery", () => {
+	const log = [];
+	const { platform } = opened({ listen: ["wheel"], toDrawing: (s) => (log.push("toDrawing"), s), hit: () => (log.push("hit"), null), focus: () => log.push("focus"), deliver: () => log.push("deliver") });
+	platform.surface.fire("wheel", recorded(wheelEvent(), "event", log));
+	assert.deepEqual(log, [...WHEEL_FIELDS.map((f) => `event get ${f}`), "toDrawing", "hit", "deliver"]);
+	const other = [];
+	const { platform: noWheel } = opened({ listen: ["wheel", "context-menu"] });
+	for (const name of ["pointerdown", "contextmenu", "dblclick"]) noWheel.surface.fire(name, recorded(pointerEvent({ deltaX: NaN }), "event", other));
+	assert.ok(!other.some((l) => /delta/.test(l)), "no delta is read of any event but a wheel's");
+});
+
+test("I15: a browser's wheel event, its fields inherited accessors, over Node.js's own EventTarget: its deltas and unit read through ordinary access", () => {
+	const surface = new PlatformSurface();
+	const seen = [];
+	const { capture } = openCapture({ surface, toDrawing: (s) => s, deliver: (fact) => seen.push(fact), listen: ["wheel"] });
+	surface.dispatchEvent(new PlatformWheelEvent("wheel", { deltaX: 1, deltaY: -2.5, deltaZ: 0, deltaMode: 2, ctrlKey: true, clientX: 9 }));
+	assert.deepEqual([seen[0].type, seen[0].deltaX, seen[0].deltaY, seen[0].deltaZ, seen[0].deltaMode, seen[0].ctrlKey, seen[0].screen.x, seen[0].pointerId], ["wheel", 1, -2.5, 0, 2, true, 9, null]);
+	assert.ok(typeof seen[0].time === "number" && Number.isFinite(seen[0].time), "an Event's own timeStamp, a number the platform gave");
+	capture.close();
+});
+
+test("I17: a context-menu fact is a pointer fact -- its fields read as a pointer event's, the conversion and the hit asked, its deltas and deltaMode null", () => {
+	const log = [];
+	const target = { kind: "pressed" };
+	const { platform, delivered } = opened({ listen: ["context-menu"], toDrawing: (s) => (log.push("toDrawing"), { x: s.x + 1, y: s.y }), hit: (t, fact) => (log.push(["hit", t === target, fact.type, fact.hit]), "hit"), focus: () => log.push("focus"), deliver: () => log.push("deliver") });
+	platform.surface.fire("contextmenu", recorded(pointerEvent({ button: 2, buttons: 2, pointerId: 1, pointerType: "mouse", target, clientX: 5, clientY: 6, timeStamp: 77, deltaX: 1, deltaMode: 1 }), "event", log));
+	assert.deepEqual(log, [...FIELDS.map((f) => `event get ${f}`), "toDrawing", ["hit", true, "context-menu", null], "deliver"], "hit asked with the target and the fact so far; focus never");
+	const delivering = opened({ listen: ["context-menu"], hit: () => "hit" });
+	delivering.platform.surface.fire("contextmenu", pointerEvent({ button: 2, buttons: 2, pointerId: 1, clientX: 5, clientY: 6, timeStamp: 77 }));
+	assert.deepEqual(delivering.delivered[0].fact, { type: "context-menu", at: { x: 10, y: 12 }, screen: { x: 5, y: 6 }, hit: "hit", focus: null, button: 2, buttons: 2, pointerId: 1, pointerType: "mouse", key: null, code: null, repeat: null, shiftKey: false, ctrlKey: false, altKey: false, metaKey: false, deltaX: null, deltaY: null, deltaZ: null, deltaMode: null, time: 77 });
+	const mouse = pointerEvent({ button: 2, clientX: 1, clientY: 1 });
+	delete mouse.pointerId;
+	delete mouse.pointerType;
+	delivering.platform.surface.fire("contextmenu", mouse);
+	assert.deepEqual([delivering.delivered[1].fact.pointerId, delivering.delivered[1].fact.pointerType], [null, null], "a MouseEvent's menu, as some systems deliver it, carries no pointerId");
+	refused("contextmenu", () => delivering.platform.surface.fire("contextmenu", pointerEvent({ clientX: NaN })), (e) => e.message.startsWith("contextmenu: the event's clientX"));
+});
+
+test("I16: every pointer fact's time is its event's timeStamp under Object.is when a finite number, and null for NaN, an infinity, a string or an absent field", () => {
+	const { platform, delivered } = opened({ listen: ["wheel", "context-menu"] });
+	const time = (name, timeStamp, drop = false) => {
+		const event = name === "wheel" ? wheelEvent({ timeStamp }) : pointerEvent({ timeStamp });
+		if (drop) delete event.timeStamp;
+		platform.surface.fire(name, event);
+		return delivered.at(-1).fact.time;
+	};
+	for (const [name] of [...POINTER, ["wheel"], ["contextmenu"]]) {
+		for (const value of [0, -0, 1234.567, 1e-300, Number.MAX_VALUE, -5, 2 ** 53 + 2]) assert.ok(Object.is(time(name, value), value), `${name} ${value}`);
+		for (const value of [NaN, Infinity, -Infinity, "12", null, undefined, 12n, {}, true]) assert.equal(time(name, value), null, `${name} ${String(value)}`);
+		assert.equal(time(name, undefined, true), null, `${name}: absent`);
+	}
+});
+
+test("I16: timeStamp is read after the modifiers and before target, a getter that throws refusing the event; step 4's fact, handed to hit, holds the five new properties", () => {
+	const log = [];
+	const { platform } = opened({ deliver: () => log.push("deliver") });
+	const hooks = { get: (t, k) => (k === "timeStamp" ? (() => { throw new RangeError("no time"); })() : t[k]) };
+	refused("pointermove", () => platform.surface.fire("pointermove", recorded(pointerEvent({ timeStamp: 1 }), "event", log, hooks)), (e) => e.message === "pointermove: the event's timeStamp could not be read: an object");
+	assert.deepEqual(log, FIELDS.slice(0, FIELDS.indexOf("timeStamp") + 1).map((f) => `event get ${f}`), "stopped at timeStamp: target and preventDefault unread, nothing delivered");
+	const handed = [];
+	const { platform: hitting, delivered } = opened({ listen: ["wheel"], hit: (t, fact) => (handed.push(fact), "answer") });
+	hitting.surface.fire("pointerdown", pointerEvent({ timeStamp: 31 }));
+	hitting.surface.fire("wheel", wheelEvent({ timeStamp: 32, deltaX: -0, deltaMode: 2 }));
+	assert.deepEqual(Object.keys(handed[0]), KEYS_OF_A_FACT);
+	assert.deepEqual([handed[0].hit, handed[0].focus, handed[0].time, handed[0].deltaX, handed[0].deltaMode], [null, null, 31, null, null]);
+	assert.deepEqual([handed[1].type, handed[1].hit, handed[1].time, handed[1].deltaMode], ["wheel", null, 32, 2]);
+	assert.ok(Object.is(handed[1].deltaX, -0));
+	assert.deepEqual({ ...delivered[1].fact, hit: null }, handed[1], "the delivered fact, the answer apart");
+});
+
+test("I3, IC1: with listen naming all three, opening, a wheel, a context menu and a blur each claimed, and close log exactly IC1's reads -- the wheel's deltas and every event's timeStamp among them -- and each platform call once; no target is read", () => {
+	const log = [];
+	const targetLog = [];
+	const listeners = new Map();
+	let surface, keys;
+	const call = (name, self, own, args = []) => log.push(`call ${name}${args.length ? ` ${args.join(" ")}` : ""}${self === own() ? "" : " WRONG RECEIVER"}`);
+	surface = recorded({
+		addEventListener(name, listener, ...rest) {
+			listeners.set(`surface ${name}`, listener);
+			call("surface.addEventListener", this, () => surface, [name, typeof listener, ...rest.map((o) => JSON.stringify(o))]);
+		},
+		removeEventListener(name, listener, ...rest) {
+			call("surface.removeEventListener", this, () => surface, [name, listener === listeners.get(`surface ${name}`), ...rest]);
+		},
+		setPointerCapture(pointerId) {
+			call("surface.setPointerCapture", this, () => surface, [pointerId]);
+		},
+	}, "surface", log);
+	keys = recorded({
+		addEventListener(name, listener, ...rest) {
+			listeners.set(`keys ${name}`, listener);
+			call("keys.addEventListener", this, () => keys, [name, typeof listener, ...rest]);
+		},
+		removeEventListener(name, listener, ...rest) {
+			call("keys.removeEventListener", this, () => keys, [name, listener === listeners.get(`keys ${name}`), ...rest]);
+		},
+	}, "keys", log);
+	const target = recorded({}, "target", targetLog);
+	const modifiers = { shiftKey: false, ctrlKey: true, altKey: false, metaKey: false, timeStamp: 5, target };
+	let wheel, menu, blur;
+	wheel = recorded({ clientX: 1, clientY: 2, button: 0, buttons: 0, ...modifiers, deltaX: 0, deltaY: -1.5, deltaZ: 0, deltaMode: 0, preventDefault() { call("wheel.preventDefault", this, () => wheel); } }, "wheel", log);
+	menu = recorded({ clientX: 1, clientY: 2, button: 2, buttons: 2, pointerId: 3, pointerType: "mouse", ...modifiers, preventDefault() { call("menu.preventDefault", this, () => menu); } }, "menu", log);
+	blur = recorded({ timeStamp: 6, target, preventDefault() { call("blur.preventDefault", this, () => blur); } }, "blur", log);
+	const result = openCapture({ surface, keys, toDrawing: (s) => s, hit: () => "hit", focus: () => "focus", listen: ["blur", "context-menu", "wheel"], deliver: (fact, reply) => reply.claim() });
+	assert.equal(result.ok, true);
+	listeners.get("surface wheel")(wheel);
+	listeners.get("surface contextmenu")(menu);
+	listeners.get("keys blur")(blur);
+	result.capture.close();
+	const POINTER_NAMES = POINTER.map(([n]) => n);
+	const pointerReads = (label, extra = []) => ["clientX", "clientY", "button", "buttons", "pointerId", "pointerType", "shiftKey", "ctrlKey", "altKey", "metaKey", ...extra, "timeStamp", "target", "preventDefault"].map((f) => `${label} get ${f}`);
+	assert.deepEqual(log, [
+		"surface get addEventListener",
+		"surface get removeEventListener",
+		"surface get setPointerCapture",
+		"keys get addEventListener",
+		"keys get removeEventListener",
+		...POINTER_NAMES.map((n) => `call surface.addEventListener ${n} function`),
+		"call keys.addEventListener keydown function",
+		"call keys.addEventListener keyup function",
+		'call surface.addEventListener wheel function {"passive":false}',
+		"call surface.addEventListener contextmenu function",
+		"call keys.addEventListener blur function",
+		...pointerReads("wheel", ["deltaX", "deltaY", "deltaZ", "deltaMode"]),
+		"call wheel.preventDefault",
+		...pointerReads("menu"),
+		"call menu.preventDefault",
+		"blur get timeStamp",
+		"blur get preventDefault",
+		"call blur.preventDefault",
+		"call keys.removeEventListener blur true",
+		"call surface.removeEventListener contextmenu true",
+		"call surface.removeEventListener wheel true",
+		"call keys.removeEventListener keyup true",
+		"call keys.removeEventListener keydown true",
+		...[...POINTER_NAMES].reverse().map((n) => `call surface.removeEventListener ${n} true`),
+	]);
+	assert.deepEqual(targetLog, [], "the targets' logs are empty");
 });

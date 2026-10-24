@@ -3,7 +3,9 @@
  */
 export { openCapture } from "./open-capture.js";
 export type {
+	BlurFact,
 	Capture,
+	CaptureBlurEvent,
 	CaptureDeclaration,
 	CaptureDeclarationWithKeys,
 	CaptureDeclarationWithoutKeys,
@@ -15,12 +17,16 @@ export type {
 	CapturePointerEvent,
 	CaptureReply,
 	CaptureSurface,
+	CaptureWheelEvent,
+	ContextMenuFact,
 	ConvertedPoint,
 	DeclarationProblem,
 	DeclarationProblemCode,
 	KeyFact,
 	KeyFactType,
+	ListenName,
 	OpenCaptureResult,
 	PointerFact,
 	PointerFactType,
+	WheelFact,
 } from "./types.js";

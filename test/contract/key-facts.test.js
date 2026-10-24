@@ -8,7 +8,7 @@ import { openCapture } from "@apnex/input-capture";
 import { declarationOver, fakePlatform, keyEvent, PlatformKeyEvent } from "../support/fakes.js";
 import { recorded } from "../support/recording-proxy.js";
 
-const FIELDS = ["key", "code", "repeat", "shiftKey", "ctrlKey", "altKey", "metaKey", "target", "preventDefault"];
+const FIELDS = ["key", "code", "repeat", "shiftKey", "ctrlKey", "altKey", "metaKey", "timeStamp", "target", "preventDefault"];
 const refused = (name, call, also = () => true) => assert.throws(call, (e) => e instanceof TypeError && e.message.startsWith(`${name}: `) && also(e), `refused with a TypeError beginning "${name}: "`);
 
 function opened(extra = {}) {
@@ -32,12 +32,12 @@ test("IC4: a keydown and a keyup on the key source become key-down and key-up fa
 	assert.ok(!none.surface.live.has("keydown"));
 });
 
-test("IC5: a key fact holds exactly its sixteen properties, in order, its pointer fields null", () => {
+test("IC5: a key fact holds exactly its twenty-one properties, in order, its pointer and wheel fields null, its time the event's timeStamp", () => {
 	const { platform, delivered } = opened({ focus: () => "the focus" });
-	platform.keys.fire("keydown", keyEvent({ key: "Shift", code: "ShiftLeft", repeat: true, shiftKey: true, altKey: "yes" }));
+	platform.keys.fire("keydown", keyEvent({ key: "Shift", code: "ShiftLeft", repeat: true, shiftKey: true, altKey: "yes", timeStamp: 812.5, deltaX: 3, deltaMode: 1 }));
 	const { fact } = delivered[0];
-	assert.deepEqual(Object.keys(fact), ["type", "at", "screen", "hit", "focus", "button", "buttons", "pointerId", "pointerType", "key", "code", "repeat", "shiftKey", "ctrlKey", "altKey", "metaKey"]);
-	assert.deepEqual(fact, { type: "key-down", at: null, screen: null, hit: null, focus: "the focus", button: null, buttons: null, pointerId: null, pointerType: null, key: "Shift", code: "ShiftLeft", repeat: true, shiftKey: true, ctrlKey: false, altKey: true, metaKey: false });
+	assert.deepEqual(Object.keys(fact), ["type", "at", "screen", "hit", "focus", "button", "buttons", "pointerId", "pointerType", "key", "code", "repeat", "shiftKey", "ctrlKey", "altKey", "metaKey", "deltaX", "deltaY", "deltaZ", "deltaMode", "time"]);
+	assert.deepEqual(fact, { type: "key-down", at: null, screen: null, hit: null, focus: "the focus", button: null, buttons: null, pointerId: null, pointerType: null, key: "Shift", code: "ShiftLeft", repeat: true, shiftKey: true, ctrlKey: false, altKey: true, metaKey: false, deltaX: null, deltaY: null, deltaZ: null, deltaMode: null, time: 812.5 });
 });
 
 test("I4: every reading of IC5 for a key event -- key and code absent or of another type, repeat and the modifiers of every truthiness; an ordinary key event holding no pointer field", () => {
@@ -61,7 +61,7 @@ test("I4: every reading of IC5 for a key event -- key and code absent or of anot
 	}
 	const ordinary = { key: "z", code: "KeyZ", repeat: false, target: null, preventDefault() {} };
 	platform.keys.fire("keydown", ordinary);
-	assert.deepEqual(delivered.at(-1).fact, { type: "key-down", at: null, screen: null, hit: null, focus: null, button: null, buttons: null, pointerId: null, pointerType: null, key: "z", code: "KeyZ", repeat: false, shiftKey: false, ctrlKey: false, altKey: false, metaKey: false });
+	assert.deepEqual(delivered.at(-1).fact, { type: "key-down", at: null, screen: null, hit: null, focus: null, button: null, buttons: null, pointerId: null, pointerType: null, key: "z", code: "KeyZ", repeat: false, shiftKey: false, ctrlKey: false, altKey: false, metaKey: false, deltaX: null, deltaY: null, deltaZ: null, deltaMode: null, time: null });
 });
 
 test("IC6 step 2: a key event's coordinates and button are never read or judged, and a key fact carries none of them", () => {
@@ -145,4 +145,33 @@ test("IC1: the key source's own event objects -- Node.js's EventTarget with key 
 	result.capture.close();
 	source.dispatchEvent(new PlatformKeyEvent("keydown"));
 	assert.equal(seen.length, 3);
+});
+
+test("I16: every key fact's time is its event's timeStamp under Object.is when a finite number, and null for NaN, an infinity, a string or an absent field; read after the modifiers, a throwing getter refusing the event", () => {
+	const { platform, delivered } = opened();
+	const time = (name, timeStamp, drop = false) => {
+		const event = keyEvent({ timeStamp });
+		if (drop) delete event.timeStamp;
+		platform.keys.fire(name, event);
+		return delivered.at(-1).fact.time;
+	};
+	for (const name of ["keydown", "keyup"]) {
+		for (const value of [0, -0, 99.999, 1e300, -1]) assert.ok(Object.is(time(name, value), value), `${name} ${value}`);
+		for (const value of [NaN, Infinity, -Infinity, "5", null, undefined, 5n]) assert.equal(time(name, value), null, `${name} ${String(value)}`);
+		assert.equal(time(name, undefined, true), null, `${name}: absent`);
+	}
+	const log = [];
+	const { platform: throwing } = opened({ focus: () => log.push("focus"), deliver: () => log.push("deliver") });
+	const hooks = { get: (t, k) => (k === "timeStamp" ? (() => { throw "no time"; })() : t[k]) };
+	refused("keydown", () => throwing.keys.fire("keydown", recorded(keyEvent(), "event", log, hooks)), (e) => e.message === "keydown: the event's timeStamp could not be read: no time");
+	assert.deepEqual(log, FIELDS.slice(0, FIELDS.indexOf("timeStamp") + 1).map((f) => `event get ${f}`));
+	const handed = [];
+	const { platform: focusing } = opened({ focus: (t, fact) => (handed.push(fact), 1) });
+	focusing.keys.fire("keyup", keyEvent({ timeStamp: 8 }));
+	assert.deepEqual([handed[0].focus, handed[0].time, handed[0].deltaX, handed[0].deltaY, handed[0].deltaZ, handed[0].deltaMode], [null, 8, null, null, null, null], "step 4's fact holds the new properties");
+	const source = new EventTarget();
+	const seen = [];
+	openCapture({ surface: { addEventListener() {}, removeEventListener() {}, setPointerCapture() {} }, keys: source, toDrawing: (s) => s, deliver: (fact) => seen.push(fact.time) });
+	source.dispatchEvent(new PlatformKeyEvent("keydown"));
+	assert.ok(typeof seen[0] === "number" && Number.isFinite(seen[0]), "an Event's own timeStamp");
 });

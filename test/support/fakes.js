@@ -53,6 +53,23 @@ export function pointerEvent(fields = {}) {
 	return event;
 }
 
+/** A wheel event of a browser's shape, as plain data: a pointer event's fields but pointerId and pointerType, and its deltas and unit. */
+export function wheelEvent(fields = {}) {
+	const event = pointerEvent({ button: 0, buttons: 0, deltaX: 0, deltaY: 120, deltaZ: 0, deltaMode: 0, timeStamp: 100, ...fields });
+	if (!("pointerId" in fields)) delete event.pointerId;
+	if (!("pointerType" in fields)) delete event.pointerType;
+	return event;
+}
+
+/** The key source's blur, of a browser's shape, as plain data: its timeStamp and preventDefault, and a target capture never reads. */
+export function blurEvent(fields = {}) {
+	const event = { timeStamp: 200, target: { kind: "target" }, prevented: 0, ...fields };
+	if (!("preventDefault" in fields)) event.preventDefault = function () {
+		this.prevented++;
+	};
+	return event;
+}
+
 /** A key event of a browser's shape, as plain data; preventDefault records its receiver. */
 export function keyEvent(fields = {}) {
 	const event = { key: "a", code: "KeyA", repeat: false, shiftKey: false, ctrlKey: false, altKey: false, metaKey: false, target: { kind: "target" }, prevented: 0, ...fields };
@@ -95,6 +112,19 @@ export class PlatformPointerEvent extends Event {
 	get ctrlKey() { return this.#fields.ctrlKey; }
 	get altKey() { return this.#fields.altKey; }
 	get metaKey() { return this.#fields.metaKey; }
+}
+
+/** A wheel event of Node.js's own EventTarget, its fields -- the deltas and their unit among them -- inherited accessors. */
+export class PlatformWheelEvent extends PlatformPointerEvent {
+	#deltas;
+	constructor(type, fields = {}) {
+		super(type, { pointerId: undefined, pointerType: undefined, ...fields });
+		this.#deltas = { deltaX: 0, deltaY: 0, deltaZ: 0, deltaMode: 0, ...fields };
+	}
+	get deltaX() { return this.#deltas.deltaX; }
+	get deltaY() { return this.#deltas.deltaY; }
+	get deltaZ() { return this.#deltas.deltaZ; }
+	get deltaMode() { return this.#deltas.deltaMode; }
 }
 
 /** A key event of Node.js's own EventTarget, its fields inherited accessors. */

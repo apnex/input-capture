@@ -22,22 +22,28 @@ export interface ConvertedPoint {
 /** A listener capture hands the platform: it takes any value, and judges it before reading anything (IC6). */
 export type CaptureListener = (event: unknown) => void;
 
-/** The surface (IC1): the element whose pointer events capture listens to, and on which it takes the pointer. */
+/** The name of an event family a capture listens for only when its declaration lists it in `listen` (IC3, IC4). */
+export type ListenName = "wheel" | "context-menu" | "blur";
+
+/**
+ * The surface (IC1): the element whose pointer events capture listens to, and on which it takes the pointer.
+ * Its addEventListener is handed a third argument for the wheel alone, a fresh frozen { passive: false } (IC4).
+ */
 export interface CaptureSurface {
-	addEventListener(type: string, listener: CaptureListener): void;
+	addEventListener(type: string, listener: CaptureListener, options?: { readonly passive: false }): void;
 	removeEventListener(type: string, listener: CaptureListener): void;
 	setPointerCapture(pointerId: number): void;
 }
 
-/** The key source (IC1): what capture listens to for key events, which the application chooses. */
+/** The key source (IC1): what capture listens to for key events, and for its own focus loss when `listen` names it, which the application chooses. */
 export interface CaptureKeySource {
 	addEventListener(type: string, listener: CaptureListener): void;
 	removeEventListener(type: string, listener: CaptureListener): void;
 }
 
 /**
- * A pointer or double-click event, as capture reads one (IC1, IC6): every field it reads and no other.
- * Fields capture accepts absent are optional; a double click carries no pointerId or pointerType.
+ * A pointer, double-click or context-menu event, as capture reads one (IC1, IC6): every field it reads and no
+ * other. Fields capture accepts absent are optional; a double click carries no pointerId or pointerType.
  */
 export interface CapturePointerEvent {
 	readonly clientX: number;
@@ -50,8 +56,17 @@ export interface CapturePointerEvent {
 	readonly ctrlKey?: boolean | undefined;
 	readonly altKey?: boolean | undefined;
 	readonly metaKey?: boolean | undefined;
+	readonly timeStamp?: number | undefined;
 	readonly target?: unknown;
 	preventDefault(): void;
+}
+
+/** A wheel event, as capture reads one (IC1, IC6): a pointer event's fields, and its deltas and their unit. */
+export interface CaptureWheelEvent extends CapturePointerEvent {
+	readonly deltaX: number;
+	readonly deltaY: number;
+	readonly deltaZ: number;
+	readonly deltaMode?: number | undefined;
 }
 
 /** A key event, as capture reads one (IC1, IC6): every field it reads and no other. */
@@ -63,17 +78,27 @@ export interface CaptureKeyEvent {
 	readonly ctrlKey?: boolean | undefined;
 	readonly altKey?: boolean | undefined;
 	readonly metaKey?: boolean | undefined;
+	readonly timeStamp?: number | undefined;
 	readonly target?: unknown;
 	preventDefault(): void;
 }
 
-/** The type of a pointer fact, one per pointer or double-click event capture listens for (IC4). */
+/** The key source's focus loss, as capture reads it (IC1, IC6): its timeStamp and preventDefault, and no target. */
+export interface CaptureBlurEvent {
+	readonly timeStamp?: number | undefined;
+	preventDefault(): void;
+}
+
+/** The type of a pointer fact, one per pointer or double-click event capture always listens for (IC4). */
 export type PointerFactType = "leave" | "down" | "move" | "up" | "cancel" | "over" | "out" | "double";
 
 /** The type of a key fact (IC4). */
 export type KeyFactType = "key-down" | "key-up";
 
-/** A fact made from a pointer or double-click event (IC5); `hit` is the application's answer, or null when it gives no hit function. */
+/**
+ * A fact made from a pointer or double-click event (IC5); `hit` is the application's answer, or null when it
+ * gives no hit function; `time` is the event's own timeStamp when a finite number, never a clock reading.
+ */
 export interface PointerFact<Hit = null> {
 	readonly type: PointerFactType;
 	readonly at: CapturePoint;
@@ -91,6 +116,65 @@ export interface PointerFact<Hit = null> {
 	readonly ctrlKey: boolean;
 	readonly altKey: boolean;
 	readonly metaKey: boolean;
+	readonly deltaX: null;
+	readonly deltaY: null;
+	readonly deltaZ: null;
+	readonly deltaMode: null;
+	readonly time: number | null;
+}
+
+/**
+ * A fact made from a wheel event, a pointer fact a capture delivers only when its declaration lists 'wheel'
+ * (IC4, IC5): the deltas exactly as delivered, `-0` kept, in the unit `deltaMode` names -- 0 pixels, 1 lines,
+ * 2 pages -- never converted. A touchpad's pinch arrives as one with `ctrlKey` true, alike to Ctrl and the wheel.
+ */
+export interface WheelFact<Hit = null> {
+	readonly type: "wheel";
+	readonly at: CapturePoint;
+	readonly screen: CapturePoint;
+	readonly hit: Hit;
+	readonly focus: null;
+	readonly button: number;
+	readonly buttons: number | null;
+	readonly pointerId: number | null;
+	readonly pointerType: string | null;
+	readonly key: null;
+	readonly code: null;
+	readonly repeat: null;
+	readonly shiftKey: boolean;
+	readonly ctrlKey: boolean;
+	readonly altKey: boolean;
+	readonly metaKey: boolean;
+	readonly deltaX: number;
+	readonly deltaY: number;
+	readonly deltaZ: number;
+	readonly deltaMode: 0 | 1 | 2 | null;
+	readonly time: number | null;
+}
+
+/** A fact made from a context-menu event, a pointer fact a capture delivers only when its declaration lists 'context-menu' (IC4, IC5). */
+export interface ContextMenuFact<Hit = null> {
+	readonly type: "context-menu";
+	readonly at: CapturePoint;
+	readonly screen: CapturePoint;
+	readonly hit: Hit;
+	readonly focus: null;
+	readonly button: number;
+	readonly buttons: number | null;
+	readonly pointerId: number | null;
+	readonly pointerType: string | null;
+	readonly key: null;
+	readonly code: null;
+	readonly repeat: null;
+	readonly shiftKey: boolean;
+	readonly ctrlKey: boolean;
+	readonly altKey: boolean;
+	readonly metaKey: boolean;
+	readonly deltaX: null;
+	readonly deltaY: null;
+	readonly deltaZ: null;
+	readonly deltaMode: null;
+	readonly time: number | null;
 }
 
 /** A fact made from a key event (IC5); `focus` is the application's answer, or null when it gives no focus function. */
@@ -111,10 +195,49 @@ export interface KeyFact<Focus = null> {
 	readonly ctrlKey: boolean;
 	readonly altKey: boolean;
 	readonly metaKey: boolean;
+	readonly deltaX: null;
+	readonly deltaY: null;
+	readonly deltaZ: null;
+	readonly deltaMode: null;
+	readonly time: number | null;
 }
 
-/** The frozen record capture makes from one event (IC5). */
-export type CaptureFact<Hit = null, Focus = null> = PointerFact<Hit> | KeyFact<Focus>;
+/**
+ * A fact made from the key source's focus loss, delivered only when the declaration lists 'blur' (IC4, IC5): its
+ * time, every modifier false and every other property null; neither hit nor focus is asked for it.
+ */
+export interface BlurFact {
+	readonly type: "blur";
+	readonly at: null;
+	readonly screen: null;
+	readonly hit: null;
+	readonly focus: null;
+	readonly button: null;
+	readonly buttons: null;
+	readonly pointerId: null;
+	readonly pointerType: null;
+	readonly key: null;
+	readonly code: null;
+	readonly repeat: null;
+	readonly shiftKey: false;
+	readonly ctrlKey: false;
+	readonly altKey: false;
+	readonly metaKey: false;
+	readonly deltaX: null;
+	readonly deltaY: null;
+	readonly deltaZ: null;
+	readonly deltaMode: null;
+	readonly time: number | null;
+}
+
+/** The pointer facts a declaration's `listen` adds: a WheelFact for 'wheel' and a ContextMenuFact for 'context-menu'. */
+type ListenedPointerFact<Hit, Listen extends ListenName> = ("wheel" extends Listen ? WheelFact<Hit> : never) | ("context-menu" extends Listen ? ContextMenuFact<Hit> : never);
+
+/**
+ * The frozen record capture makes from one event (IC5): a pointer or key fact, and a fact of each family the
+ * declaration lists in `listen`, `Listen` being the names it lists -- none by default.
+ */
+export type CaptureFact<Hit = null, Focus = null, Listen extends ListenName = never> = PointerFact<Hit> | KeyFact<Focus> | ListenedPointerFact<Hit, Listen> | ("blur" extends Listen ? BlurFact : never);
 
 /** What the application may ask of one fact while it is delivered (IC8). */
 export interface CaptureReply {
@@ -131,33 +254,35 @@ export interface Capture {
 }
 
 /** What every declaration holds, whether or not it gives a key source. */
-interface CaptureDeclarationBase<Hit, Focus> {
+interface CaptureDeclarationBase<Hit, Focus, Listen extends ListenName> {
 	/** The element whose pointer events capture listens to. */
 	readonly surface: CaptureSurface;
 	/** The conversion: where a screen point lies in the application's coordinates (IC7). */
 	readonly toDrawing: (screen: CapturePoint) => ConvertedPoint;
 	/** The hit test, asked for every pointer fact with the platform's target and the fact so far (IC7). */
-	readonly hit?: (target: unknown, fact: PointerFact<null>) => Hit;
+	readonly hit?: (target: unknown, fact: PointerFact<null> | ListenedPointerFact<null, Listen>) => Hit;
 	/** The delivery, handed every fact with its reply; its answer is ignored (IC7). */
-	readonly deliver: (fact: CaptureFact<Hit, Focus>, reply: CaptureReply) => unknown;
+	readonly deliver: (fact: CaptureFact<Hit, Focus, Listen>, reply: CaptureReply) => unknown;
+	/** The event families listened for beyond the pointer and key events, each named once; absent, none (IC3, IC4). */
+	readonly listen?: readonly Listen[];
 }
 
-/** A declaration giving a key source, and optionally the focus reading. */
-export interface CaptureDeclarationWithKeys<Hit, Focus> extends CaptureDeclarationBase<Hit, Focus> {
+/** A declaration giving a key source, and optionally the focus reading and its focus loss. */
+export interface CaptureDeclarationWithKeys<Hit, Focus, Listen extends ListenName = never> extends CaptureDeclarationBase<Hit, Focus, Listen> {
 	/** What capture listens to for key events: the surface itself is allowed. */
 	readonly keys: CaptureKeySource;
 	/** The focus reading, asked for every key fact with the platform's target and the fact so far (IC7). */
 	readonly focus?: (target: unknown, fact: KeyFact<null>) => Focus;
 }
 
-/** A declaration giving no key source, and so no focus reading. */
-export interface CaptureDeclarationWithoutKeys<Hit> extends CaptureDeclarationBase<Hit, null> {
+/** A declaration giving no key source, and so no focus reading and no focus loss. */
+export interface CaptureDeclarationWithoutKeys<Hit, Listen extends Exclude<ListenName, "blur"> = never> extends CaptureDeclarationBase<Hit, null, Listen> {
 	readonly keys?: never;
 	readonly focus?: never;
 }
 
-/** A capture's declaration (IC3): `focus` requires `keys`. */
-export type CaptureDeclaration<Hit = null, Focus = null> = CaptureDeclarationWithKeys<Hit, Focus> | CaptureDeclarationWithoutKeys<Hit>;
+/** A capture's declaration (IC3): `focus`, and 'blur' in `listen`, require `keys`; `Listen` is inferred from `listen`'s elements. */
+export type CaptureDeclaration<Hit = null, Focus = null, Listen extends ListenName = never> = CaptureDeclarationWithKeys<Hit, Focus, Listen> | CaptureDeclarationWithoutKeys<Hit, Exclude<Listen, "blur">>;
 
 /** The codes a refused declaration's problems carry (IC3). */
 export type DeclarationProblemCode = "not-an-object" | "unknown-property" | "missing-property" | "invalid-value";
