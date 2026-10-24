@@ -5,9 +5,9 @@
 // IC9's closing list names: a declaration with an own listen property is judged, every event's timeStamp is
 // read -- so an event whose timeStamp getter throws is refused -- and every fact gains five properties after
 // metaKey. Each run records a transcript -- every trap a recording Proxy runs, every platform call, every
-// application function's arguments, every fact in full, every throw -- and this release's transcript, its
-// timeStamp reads and its facts' last five properties taken out, must equal 0.1.0's; the listed changes are
-// then each shown with both answers.
+// application function's arguments, every fact in full, every throw -- and this release's transcript, each
+// event's one timeStamp read at its IC6 position and its facts' last five properties taken out, must equal
+// 0.1.0's; the listed changes are then each shown with both answers.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { after, before, test } from "node:test";
@@ -115,11 +115,17 @@ function transcript(openCapture, scenario) {
 	return log;
 }
 
-/** This release's transcript as 0.1.0's would read: its timeStamp reads taken out, and its facts' last five properties, which must be IC5's five. */
+/**
+ * This release's transcript as 0.1.0's would read: exactly one `event get timeStamp` taken out of each event's
+ * reads, at its IC6 position -- after the event's metaKey and before its target -- and its facts' last five
+ * properties, which must be IC5's five. Any other timeStamp read -- an event's second, or one of another object,
+ * the surface's among them -- stays in the transcript, and fails the comparison.
+ */
 function asReleased(log, counts) {
 	const out = [];
-	for (const entry of log) {
-		if (typeof entry === "string" && entry.endsWith(" get timeStamp")) {
+	for (let index = 0; index < log.length; index++) {
+		const entry = log[index];
+		if (entry === "event get timeStamp" && out.at(-1) === "event get metaKey" && log[index + 1] === "event get target") {
 			counts.timeStamp++;
 			continue;
 		}
