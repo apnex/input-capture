@@ -445,7 +445,7 @@ test("IC4: capture queues and merges nothing -- a key event delivered to a point
 
 test("I15: a wheel event's fact holds its deltas under Object.is, -0 among them, and ctrlKey as given; its keys in IC5's order", () => {
 	const { platform, delivered } = opened({ listen: ["wheel"], hit: () => "under" });
-	const cases = [[0, 120, 0], [-0, -0, -0], [1.5, -2.959766149520874, 1e-300], [-Number.MAX_VALUE, Number.MAX_VALUE, Number.MIN_VALUE], [0.1 + 0.2, -3.3163959980010986, 7]];
+	const cases = [[0, 120, 0], [-0, -0, -0], [1.5, -2.9597661495, 1e-300], [-Number.MAX_VALUE, Number.MAX_VALUE, Number.MIN_VALUE], [0.1 + 0.2, -3.316395998, 7]];
 	for (const [deltaX, deltaY, deltaZ] of cases) {
 		for (const ctrlKey of [false, true]) {
 			platform.surface.fire("wheel", wheelEvent({ deltaX, deltaY, deltaZ, ctrlKey, clientX: 3, clientY: 4, timeStamp: 55.5 }));
