@@ -105,3 +105,106 @@ Bytes as shipped, comments included, then with comments removed, each also gzipp
 | `event-reading.js` | 4,794 | 1,289 | 3,623 | 816 |
 | `reply.js`, `fact.js`, `declaration-problems.js`, `index.js`, `types.js` | 5,660 | 2,374 | 3,837 | 1,407 |
 | every built module | 23,075 | 7,593 | 15,715 | 4,538 |
+
+---
+
+## D3 - The contract of record for 0.2.0 is the components' next releases, section 3.1
+
+**Ruled by:** the director, 2026-10-24 (draw's `H26-14`).\
+**Affects:** `CONTRACT.md`, `README.md`, `src/`, `test/`, `tools/`, `.github/workflows/`, `export-map.json`, `package.json` and `.gitignore`.
+
+**Ruling.**\
+The contract of record for `0.2.0` is section 3.1 of draw's `dev/design/components/RELEASES-0.2.md`, revision 4, ratified with every decision RD1 to RD19 at its recommendation, together with what its section 3.5 asks of this repository: the contract freed of draw, the consumer reference, the gates of B424 and the vocabulary list renamed.\
+`CONTRACT.md` carries it, amended rule by rule and stated on its own terms, its Reference keeping one provenance line; `D2`'s rulings and choices stand wherever `0.2.0` does not change them, but its choice that the vocabulary lists are `snap-grid`'s unchanged, which this ruling supersedes: the list named `gesture-tester` is renamed `input-tester`, its words kept.
+
+**Choices made at build, each confirmed by the recorder.**\
+Where section 3.1 was silent or left a choice open, the build made these; each that a test can hold is held by one:
+- `listen`'s array is judged as `input-binding` judges an array: an array index is a canonical integer string below 2^32 - 1; an own key that is neither `length` nor an index refuses the array at its own keys, before `length` is read; a sparse array is refused once `length`'s descriptor is read, before any index's; an empty array is of its form and adds nothing.
+- An array refused at `/listen` reports nothing beneath it, though elements before an accessor or a phantom index were read, by descriptor, and judged; the reads stop at the refusal (the erratum E4 below).
+- Step 8 compares an element with every earlier element, refused or not, so the second of two `'blur'` elements with no `keys` is refused by step 8 alone, as the design says; an element that is no string is none of the three names.
+- A refusal of a listed family's event begins with the platform event's name, as every listener's does: `wheel: `, `contextmenu: ` and `blur: `; a delta refused reads `<name>: the event's deltaX must be a finite number`.
+- A `blur` fact's reply answers `takePointer` with `false`, its `pointerId` being `null`, and its `claim` calls `preventDefault`, as IC8 says of every fact.
+- The listener plan is one table in `src/open-capture.ts` -- the ten, then the three in the table's order filtered by `listen` -- and the wheel's options object is made inside the loop, at the call, so no two calls share one.
+- The types state the slice IC1 now touches: `timeStamp` optional on every event type, `CaptureWheelEvent` extending `CapturePointerEvent` with the deltas and an optional `deltaMode`, `CaptureBlurEvent` holding an optional `timeStamp` and `preventDefault`, both exported beside the design's `WheelFact`, `ContextMenuFact`, `BlurFact` and `ListenName`, and the surface's `addEventListener` taking an optional third argument `{ readonly passive: false }`; a browser's `WheelEvent`, `FocusEvent` and elements stay assignable (I11).
+- The declaration's type refuses `'blur'` in `listen` without `keys`, as it refuses `focus` without `keys`: `CaptureDeclarationWithoutKeys`'s `Listen` excludes `'blur'`; `BlurFact`'s modifiers are typed `false`; the union of listed pointer facts is a local type, not exported, so the package's types name nothing more than the design's four and the two event types.
+- `Listen` is inferred from `listen` written in the call or `as const`; one typed `string[]` fails to compile, a trap `README.md` states.
+- I11's test compiles the consumer again with every `@ts-expect-error` taken out and finds each expected error on its own line and no other line failing, as `vector-scene`'s does, so no expected error passes for a reason not its own.
+- I18 runs the `0.1.0` release as published: its tarball, the very release asset, is kept as `test/fixtures/apnex-input-capture-0.1.0.tgz`, un-ignored in `.gitignore`, its SHA-512 checked against the integrity a consumer's lockfile records for it, `sha512-CWfGWhjx6zcWs4Bhqb/DpISr3by63Wm1v1zzzkK2xzpakU+ODH1QWv4utwLHhNjco3G5pyYhyWTdvsA8+ASSkQ==`, and its built files extracted by the test's own tar reader (`test/support/released.js`) and imported; it is no dependency, since npm does not check a `file:` tarball's integrity -- a tampered copy installed without complaint (measured) -- and the release's address reaches a network.
+- I18 compares transcripts -- every trap a recording `Proxy` runs, every platform call and its arguments' count, every application function's arguments, every fact in full and every throw -- over `0.1.0`'s contract tables, rebuilt as factories so each release receives fresh and equal inputs; from this release's transcript it takes out its `timeStamp` reads and its facts' last five properties, which must be IC5's five, and requires the rest equal; each of the closing list's changes is then shown with both releases' answers.
+- I10's page lists all three families on its one capture, so 0.1.0's right-press test filters its `down` and `up`, a `context-menu` fact now falling between them; the page is made scrollable by a block 3000 pixels tall beneath the surface; a later listener on the surface records whether a context menu was claimed; and every fact's `time` is kept for the closing check.
+- I10's second tab is opened by `Target.createTarget` on the page's own session, after `Page.bringToFront`, and closed by `Target.closeTarget`, the page brought to the front again: a page focused by trusted input alone kept `document.hasFocus()` true, and heard no `blur`, when a second tab opened, and brought to the front heard one in every run (measured, eight runs).
+- I10 restores the page's scale with `Emulation.setPageScaleFactor` after the unclaimed pinch, since `Emulation.resetPageScaleFactor` left it at 2 (measured), and scrolls back with `window.scrollTo`.
+- Each of I10's claimed wheel tests first waits a second with no wheel: Chrome latched a wheel 390 milliseconds after an unclaimed one to that one's scroll sequence and dispatched it uncancelable (measured), so a claim of it could prevent nothing; the out and leave Chrome fires as the scrolling page moves the surface from under the still pointer are filtered from the unclaimed wheel's facts.
+- I10's closing test also turns a wheel, presses the right button and opens a second tab after `close`, and finds nothing delivered.
+- RD2's `{ passive: false }` is held by I14's third argument and I3's recording test, not by I10: Chrome never makes an element's wheel listener passive, so the claimed wheel on I10's SVG surface passes with two arguments too; a second capture on the page's body was tried, but a blocking wheel listener on the body -- the capture's or a page's own -- heard no wheel, or an uncancelable one, varying from run to run in headless Chrome 136 (measured), so it is not gated (the erratum E2 below).
+- The runtime check is `vector-scene`'s, its built-ins the design's thirteen, of which this build names ten -- `Array`, `Error`, `Map`, `Number`, `Object`, `Reflect`, `Set`, `String`, `TypeError` and `undefined` -- the test holding every global the build names to the thirteen and stating the ten, not `vector-scene`'s exact list, since the design states the thirteen.
+- Its platform-member pass reads `lib.dom.d.ts`'s members of the ten interfaces the design names and every interface they extend, and allows exactly the design's twenty-eight names, `PLATFORM_SLICE`; `findRuntimeUses` takes an optional allowed set, so a test narrows it by the build's own names and finds exactly `focus`, `name` and `length` -- on `0.1.0`'s build too (measured) -- and its falsifiers are an event's `composedPath` and a target's `tagName`, with `getModifierState`, `relatedTarget`, `type` and `defaultPrevented` beside them, each by dot, brackets, destructuring, `in` and a reflection's literal key.
+- The source check takes `vector-scene`'s fix, every comment found from the parsed tree, with its test planting the form after a template literal in `src/event-reading.ts`.
+- I10's teardown takes `vector-scene`'s removal of Chrome's singleton socket's directory, with its unit test, and a test launching a real Chrome and finding neither its profile nor that directory left, the link to it asserted present.
+- The release workflow takes `vector-scene`'s retried lookup of the draft, twelve tries five seconds apart; no test holds it, the workflow running only on a pushed tag.
+- The consumer test's exercise lists the wheel and focus loss, and delivers a wheel and a focus loss beside its press and key, in Node.js over fakes and in Chrome over a constructed `WheelEvent` and `FocusEvent`.
+- `test/contract/focus-loss-facts.test.js` is the new capability's contract test; `test/contract/contract-coverage.test.js` also holds that `CONTRACT.md` names no file or design of draw's but its provenance line (GR4).
+- `CONTRACT.md` drops every "the design's" reference and every draw file, keeping `input-binding`'s IB2 and IB3 as that component's published contract; IC2 gains rule 6, the array's form, which IC3's step 7 cites; the fit criteria's two rows "now read: listen for them" are written in the table's right column as "not the wrong tool: listen for them (`listen`, IC3)", the context menu's adding "and claim its fact (IC8)"; "What is returned" counts the wheel's options object among the values capture makes, frozen.
+- `D2`'s four errata against draw's design -- I10's "nothing", I8's getter, IC1's "read once" and IC8's live check -- are not folded into `CONTRACT.md`, since the design of record does not amend those sentences; they stay raised against it.
+- `README.md` names `index.js` in the package's `dist` folder for the one export path, and the vendored path a strict browser rule needs; its Use section is the consumer reference -- the function, the declaration, the problems, the fact by family, the reply and the errors, with the traps where they bite -- the status in a section of its own before Documents, and the guide linked.
+
+**Errata against draw's design** (`RELEASES-0.2.md`, revision 4):
+- E1. I10's unclaimed pinch "makes it 2": Chrome's synthesized pinch took `visualViewport.scale` to 1.9999996423721313 in one run and to 2 in another (measured); I10 holds it within 0.01 of 2, which no claimed pinch, leaving it 1, can meet.
+- E2. RD2's `{ passive: false }` (N1) cannot be shown by I10 as written: on an element surface Chrome never makes the listener passive, and on the body headless Chrome dispatches the wheel inconsistently; the sentence should hold RD2 by the listener's arguments, as I14 does.
+- E3. `VISION.md` says "Not a clock: a fact holds no time." and "receive one frozen fact for each pointer, double-click and key event"; the design amends IC5's sentence to "A fact holds no clock reading, only the event's own `timeStamp`" but names no change to the vision, which the director ratified as written, so it is left unchanged and raised: its meaning, that capture reads no clock, holds.
+- E4. IC3's step 7 says an array refused at `/listen` has "nothing beneath it read"; an array whose later element is an accessor has had the elements before it read, by descriptor, no getter run, before the refusal is known; the build reports nothing beneath it, and the sentence should say "nothing beneath it reported".
+- E5. I10's "a second tab opened over the protocol makes one `blur` fact" holds only once the page holds the window's focus, which `Page.bringToFront` gives and trusted input alone does not (measured).
+
+**Mutants planted (GR2).**\
+Each new rule's tests were run against a mutant of it planted in the working tree, rebuilt, and each mutant failed them; the runner restored every file after:
+
+| # | The rule | The mutant | Failed |
+|---|---|---|---|
+| M1 | IC3 step 2 | `listen` not among the seven | 35 of 140 contract tests: I13, I18 |
+| M2 | IC3 step 7 | another realm's array accepted, its prototype unchecked | 3: I13 |
+| M3 | IC3 step 7 | a sparse array refused only when its missing index is read | 2: I13's cases and reading order |
+| M4 | IC3 step 7 | elements refused before a later accessor element reported beside `/listen` | 1: I13 |
+| M5 | IC3 step 8 | a duplicate accepted | 1: I13 |
+| M6 | IC3 step 9 | `'blur'` without `keys` accepted | 1: I13 |
+| M7 | IC2 rule 2 | `listen`'s array read before the surface's members | 2: I13's order and the getter appending, seen |
+| M8 | IC4 | the listed listeners added in `listen`'s order | 4: I14 |
+| M9 | IC4 | the wheel's listener added with two arguments | 3: I14, I3 |
+| M10 | IC4 | one options object shared by every call | 1: I14 |
+| M11 | IC4 | the options object not frozen | 1: I14 |
+| M12 | IC3 rule 5 | the wheel removed with three arguments | 2: I14, I3 |
+| M13 | IC5 | `deltaMode` `-0` kept as `-0` | 1: I15 |
+| M14 | IC5 | `deltaMode` any number | 1: I15 |
+| M15 | IC6 | a non-finite delta not refused | 2: I15, Errors |
+| M16 | IC5 | `time` kept when not finite | 3: I16, I17 |
+| M17 | IC6 | a pointer event's `timeStamp` read after its `target` | 8: I3, I5, I16 |
+| M18 | IC6 | a key event's `timeStamp` not read | 7: IC5, I16, I18 |
+| M19 | IC6 | a blur's `target` read | 3: I17, I3 |
+| M20 | IC6 | `focus` asked for a blur | 1: I17 |
+| M21 | IC5 | a blur fact's `repeat` `false` | 2: I17 |
+| M22 | IC5 | `time` before the deltas | 9: IC5, I15, I18 |
+| M23 | IC6 | a context menu's deltas read as a wheel's | 7: I14, I15, I17 |
+| M24 | IC9 | every `CaptureFact` holds a `WheelFact`, listed or not | 4 of 5: I11 |
+| M25 | IC9 | `'blur'` without `keys` admitted by the types | 4 of 5: I11 |
+| M26 | IC9 | the `focus-loss-facts` row taken out of the export map | 3 of 8: the export map's tests |
+| M27 | GR1 | with `listen` absent, a wheel listener added anyway | 4 of 9: I18 |
+| M28 | GR1 | an event's `button` read twice | 3 of 9: I18 |
+| M29 | B424 | `composedPath` allowed by the member pass | 3 of 19 gate-check tests |
+| M30 | B424 | the member pass skipped | 3 of 19 |
+| M31 | B424 | a fourteenth built-in allowed | 1 of 19 |
+| M32 | B424 | the source check's comments found by a bare scanner again | 1 of 19 |
+| M33 | B424 | Chrome's singleton directory left by the teardown | 1 of 5 teardown tests |
+| M34 | 3.5 | the vocabulary list still named `gesture-tester` | 1 of 19 |
+| M35 | I10 | the blur listened for as `focusout` | 1 of 14 I10 tests |
+| M36 | I10 | every fact's `time` null but a negative one's | 2 of 14 |
+| M37 | GR4 | `CONTRACT.md` naming a design file of draw's beside its provenance line | 1 of 10 coverage tests |
+
+Measured by `tools/measure-size.mjs` over `dist/` as built for `0.2.0`: every built module is loaded wherever `openCapture` is imported.\
+Bytes as shipped, comments included, then with comments removed, each also gzipped at level 9:
+
+| Files | Bytes | Gzip | No comments | Gzip |
+|---|---|---|---|---|
+| `declaration-reading.js` | 10,420 | 3,097 | 6,675 | 1,790 |
+| `open-capture.js` | 8,367 | 2,498 | 5,129 | 1,357 |
+| `event-reading.js` | 6,142 | 1,552 | 4,615 | 963 |
+| `fact.js`, `reply.js`, `declaration-problems.js`, `index.js`, `types.js` | 7,059 | 2,688 | 4,920 | 1,578 |
+| every built module | 31,988 | 9,835 | 21,339 | 5,688 |
