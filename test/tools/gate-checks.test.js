@@ -5,10 +5,11 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+
+import { scratchFolder } from "@apnex/test-harness";
 
 import { candidateWords, findVocabulary, readVocabulary, splitWords } from "../../tools/check-vocabulary.mjs";
 import { findClockAndChance } from "../../tools/check-clock-and-chance.mjs";
@@ -18,7 +19,7 @@ import { findConfigProblems, findSourceProblems, sourceProblems } from "../../to
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const run = (tool, ...args) => spawnSync(process.execPath, [path.join(root, "tools", tool), ...args], { encoding: "utf8" });
 const scratch = (files) => {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "input-capture-check-"));
+	const dir = scratchFolder("input-capture-check-");
 	for (const [name, text] of Object.entries(files)) fs.writeFileSync(path.join(dir, name), text);
 	return dir;
 };
@@ -213,7 +214,7 @@ test("I12, IC1: the runtime check fails on an event's composedPath and a target'
 
 test("I12, IC1: composedPath and tagName planted in a copy of the built files are each found", () => {
 	for (const [plant, name] of [["export const planted = (event) => event.composedPath()[0];\n", "composedPath"], ["export const planted = (target) => target.tagName;\n", "tagName"]]) {
-		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "input-capture-dist-"));
+		const dir = scratchFolder("input-capture-dist-");
 		try {
 			fs.cpSync(path.join(root, "dist"), dir, { recursive: true });
 			const file = path.join(dir, "event-reading.js");
@@ -324,7 +325,7 @@ test("I12: the clock and chance check reads code only, and passes a direct membe
 
 /** A copy of the repository's src/ and tsconfig.json, with `plant` applied, checked by the source check. */
 function sourceCheckOf(plant) {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "input-capture-source-"));
+	const dir = scratchFolder("input-capture-source-");
 	try {
 		fs.cpSync(path.join(root, "src"), path.join(dir, "src"), { recursive: true });
 		fs.copyFileSync(path.join(root, "tsconfig.json"), path.join(dir, "tsconfig.json"));

@@ -4,10 +4,11 @@
 // both releases run side by side in one process with no dependency added and no network reached.
 import crypto from "node:crypto";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import zlib from "node:zlib";
+
+import { scratchFolder } from "@apnex/test-harness";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -56,7 +57,7 @@ export async function importReleased() {
 	const integrity = integrityOf(bytes);
 	if (integrity !== RELEASED.integrity) throw new Error(`the fixture ${RELEASED.file} is not the 0.1.0 release: its integrity is ${integrity}`);
 	const files = untar(bytes);
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "input-capture-released-"));
+	const dir = scratchFolder("input-capture-released-");
 	for (const [name, content] of files) {
 		if (name !== "package/package.json" && !/^package\/dist\/[\w-]+\.js$/.test(name)) continue;
 		const target = path.join(dir, name.slice("package/".length));
