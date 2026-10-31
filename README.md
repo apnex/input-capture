@@ -147,7 +147,7 @@ Using it with `input-binding`, `vector-scene` and `snap-grid` together is the su
 ## Test
 
 The gate builds, runs every test -- among them a test in headless Chrome driven with trusted input over the DevTools protocol, and one beside the first release -- then the vocabulary, source, runtime, clock and chance, and export-map checks, and mission-kit's style checks over the Markdown.\
-The tests, and the consumer test, run under `test-harness`'s runner, a development dependency pinned to its release file, which fails a run that leaves a file, a folder or a process behind.
+The tests, and the consumer test, run under `clean-runner`'s runner, a development dependency pinned to its release file, which fails a run that leaves a file, a folder or a process behind.
 
 Run the gate with a mission-kit checkout beside this repository, or with `MISSION_KIT` naming one, and with `google-chrome` on `PATH` or `CHROME` naming a Chrome:
 ```bash
