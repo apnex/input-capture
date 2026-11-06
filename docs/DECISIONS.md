@@ -254,3 +254,18 @@ The runner is not given `--test-force-exit`, which `test-harness`'s README recom
 **Ruling.**\
 The development dependency `D4` names is replaced by two, each pinned to its release file by its URL and, in the lockfile, by its hash: `@apnex/clean-runner` `0.2.0`, for the runner -- `clean-runner run` and `clean-runner exec`, and `scratchFolder` -- and `@apnex/headless-chromium` `0.1.0`, for `launchChrome`, `connectToPage`, `loseFocus`, `dumpDom` and `serveStatic`; `files` is unchanged, so neither is packed.\
 The calls are `D4`'s, each now from the component that holds it, and the runner is still given no `--test-force-exit`.
+
+---
+
+## D6 - Admitted to mission-kit's component registry as `C13`
+
+**Ruled by:** the director, 2026-11-06 (draw's `H26-1`, carried out as draw's H26.12).\
+**Affects:** `CONTRACT.md`'s frontmatter and its opening, `README.md`'s status line, and `D1`'s version clause.
+
+**Ruling.**\
+input-capture is admitted to mission-kit's component registry as `C13` (`components/C13-input-capture.md` in `apnex/mission-kit`, `649d42a`), its entry generated from `CONTRACT.md` and checked against it by a reader who built neither.\
+`CONTRACT.md`'s frontmatter now carries the id, `status: active`, and the entry's title and trigger, so the two stay one master.\
+`D1` kept the versions at `0.x` until this admission; its condition is met, and whether the next release is `1.0.0` is decided at that release, not by the admission.
+
+**Why.**\
+Draw's `H26-1` asked for each component registered, so another project finds it and uses it rather than rebuilding it (mission-kit's `C0`); draw's `dev/design/components/INPUT-CAPTURE.md` asked for admission only once draw ran on the release, and draw and the gesture tester now both do.

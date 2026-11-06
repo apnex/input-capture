@@ -180,7 +180,7 @@ Then remove the import-map entry of each page that loads it.
 
 ## Status
 
-Experimental until mission-kit admits it; runs in the Node versions `package.json`'s `engines` names, and in browsers that support ES2022.
+Admitted to mission-kit's component registry as `C13`; its versions stay `0.x` until a release decides otherwise (`docs/DECISIONS.md` `D6`); runs in the Node versions `package.json`'s `engines` names, and in browsers that support ES2022.
 
 ---
 

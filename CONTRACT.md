@@ -1,9 +1,9 @@
 ---
-id: unminted
+id: C13
 category: component
 title: input-capture - turn each platform input event on one surface into one uniform fact, and carry the application's answer back
-status: draft
-hydrate-when: An application turns a browser's pointer and key events into its own values in more than one place, or must test its input without a browser
+status: active
+hydrate-when: Your application turns a browser's pointer and key events into its own values in more than one place, or you need to test its input without a browser
 sovereignty: internal
 supersedes: []
 related: [C0, A3]
@@ -12,8 +12,8 @@ related: [C0, A3]
 # input-capture
 
 The contract of record for input-capture, ratified by the director (`docs/DECISIONS.md` here: `D2` for its first release, `D3` for the wheel, the context menu, focus loss and every fact's time).\
-It also carries the fields of a mission-kit registry entry, and that entry is generated from this file when the component is filed, never written as a second copy.\
-The registry id is unminted on purpose; one is minted only when the entry is admitted to the registry.
+It also carries the fields of a mission-kit registry entry, and that entry is generated from this file, never written as a second copy.\
+Admitted to mission-kit's component registry as `C13` on 2026-11-06 (`docs/DECISIONS.md` `D6`); its frontmatter is the entry's.
 
 ---
 
